@@ -94,11 +94,20 @@ class ControlUnit(nn.Module):
                                            nn.Tanh())
 
         self.control_input_u = nn.ModuleList()
+        self.attns = nn.ModuleList()
         for i in range(max_step):
             self.control_input_u.append(nn.Linear(module_dim, module_dim))
+            self.attns.append(
+                nn.Sequential(
+                    nn.Linear(512, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 1),
+                )
+            )
+
 
         self.module_dim = module_dim
-        self.concept_memory = HierarchicalMemory()
+        # self.concept_memory = HierarchicalMemory()
 
     def mask(self, question_lengths, device):
         max_len = question_lengths.max().item()
@@ -121,15 +130,16 @@ class ControlUnit(nn.Module):
             step: which step in the reasoning chain
         """
         # compute interactions with question words
-        question = self.control_input(question)
-        question = self.control_input_u[step](question)
+        # question = self.control_input(question)
+        # question = self.control_input_u[step](question)
 
-        newContControl = question
-        newContControl = torch.unsqueeze(newContControl, 1)
-        interactions = newContControl * context
+        # newContControl = question
+        # newContControl = torch.unsqueeze(newContControl, 1)
+        # interactions = newContControl * context
 
         # compute attention distribution over words and summarize them accordingly
-        logits = self.attn(interactions)
+        # logits = self.attn(interactions)
+        logits = self.attns[step](context)
 
         # TODO: add mask again?!
         # question_lengths = torch.cuda.FloatTensor(question_lengths)
@@ -345,6 +355,11 @@ class MACNetwork(nn.Module):
         init_modules(self.modules(), w_init=self.cfg.TRAIN.WEIGHT_INIT)
         nn.init.uniform_(self.input_unit.encoder_embed.weight, -1.0, 1.0)
         nn.init.normal_(self.mac.initial_memory)
+
+        attns = torch.load(cfg.ATTNS_PATH, map_location='cpu')
+        for i, model in enumerate(self.mac.control.attns):
+            model.load_state_dict(attns[i])
+
 
     def forward(self, image, question, question_len):
         # get image, word, and sentence embeddings
