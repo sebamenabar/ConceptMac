@@ -32,7 +32,13 @@ __C.TRAIN = dict(__C.TRAIN)
 # Dataset options
 __C.DATASET = edict()
 __C.DATASET.DATA_DIR = ''
+__C.DATASET.SCENES_DIR = ''
 __C.DATASET = dict(__C.DATASET)
+
+# Model settings
+__C.MODEL = edict()
+__C.MODEL.INPUT_UNIT = edict()
+__C.MODEL.INPUT_UNIT.NUM_LEARNABLE_OBJECTS = 10
 
 
 def _merge_a_into_b(a, b):

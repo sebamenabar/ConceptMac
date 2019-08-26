@@ -16,6 +16,8 @@ TRAIN:
 
 DATASET:
     DATA_DIR: '/mnt/nas2/GrimaRepo/datasets/CLEVR_v1.0/features'
+    SCENES_DIR: '/Users/sebamenabar/Documents/datasets/CLEVR/CLEVR_v1.0/scenes/'
 
-
-
+MODEL:
+    INPUT_UNIT:
+        NUM_LEARNABLE_OBJECTS: 0

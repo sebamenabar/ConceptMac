@@ -16,7 +16,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from utils import mkdir_p, save_model, load_vocab
-from datasets import ClevrDataset, collate_fn
+from datasets import ClevrScenesDataset, scenes_collate_fn
 import mac
 
 
@@ -67,13 +67,21 @@ class Trainer():
         cudnn.benchmark = True
 
         # load dataset
-        self.dataset = ClevrDataset(data_dir=self.data_dir, split="train")
+        self.dataset = ClevrScenesDataset(
+            data_dir=self.data_dir,
+            scenes_dir=cfg.DATASET.SCENES_DIR,
+            split="train",
+            )
         self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
-                                       num_workers=cfg.WORKERS, drop_last=True, collate_fn=collate_fn)
+                                       num_workers=cfg.WORKERS, drop_last=True, collate_fn=scenes_collate_fn)
 
-        self.dataset_val = ClevrDataset(data_dir=self.data_dir, split="val")
+        self.dataset_val = ClevrScenesDataset(
+            data_dir=self.data_dir,
+            scenes_dir=cfg.DATASET.SCENES_DIR,
+            split="val",
+            )
         self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=200, drop_last=True,
-                                         shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
+                                         shuffle=False, num_workers=cfg.WORKERS, collate_fn=scenes_collate_fn)
 
         # load model
         self.vocab = load_vocab(cfg)
@@ -146,18 +154,18 @@ class Trainer():
             ######################################################
             # (1) Prepare training data
             ######################################################
-            image, question, question_len, answer = data['image'], data['question'], data['question_length'], data['answer']
+            scenes, question, question_len, answer = data['scenes'], data['question'], data['question_length'], data['answer']
             answer = answer.long()
             question = Variable(question)
             answer = Variable(answer)
 
             if cfg.CUDA:
-                image = image.cuda()
+                scenes = scenes.cuda()
                 question = question.cuda()
                 answer = answer.cuda().squeeze()
             else:
                 question = question
-                image = image
+                scenes = scenes
                 answer = answer.squeeze()
 
             ############################
@@ -165,7 +173,7 @@ class Trainer():
             ############################
             self.optimizer.zero_grad()
 
-            scores = self.model(image, question, question_len)
+            scores = self.model(scenes, question, question_len)
             loss = self.loss_fn(scores, answer)
             loss.backward()
 
@@ -262,19 +270,19 @@ class Trainer():
             if max_iter is not None and _iteration == max_iter:
                 break
 
-            image, question, question_len, answer = data['image'], data['question'], data['question_length'], data['answer']
+            scenes, question, question_len, answer = data['scenes'], data['question'], data['question_length'], data['answer']
             answer = answer.long()
             question = Variable(question)
             answer = Variable(answer)
 
             if self.cfg.CUDA:
-                image = image.cuda()
+                scenes = scenes.cuda()
                 question = question.cuda()
                 answer = answer.cuda().squeeze()
 
             with torch.no_grad():
-                scores = self.model(image, question, question_len)
-                scores_ema = self.model_ema(image, question, question_len)
+                scores = self.model(scenes, question, question_len)
+                scores_ema = self.model_ema(scenes, question, question_len)
 
             correct_ema = scores_ema.detach().argmax(1) == answer
             accuracy_ema = correct_ema.sum().cpu().numpy() / answer.shape[0]

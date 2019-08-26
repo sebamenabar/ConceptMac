@@ -5,6 +5,14 @@ from torch.autograd import Variable
 
 from utils import *
 
+classes = {
+            'number':['0','1','2','3','4','5','6','7','8','9','10'],
+            'material':['rubber','metal'],
+            'color':['cyan','blue','yellow','purple','red','green','gray','brown'],
+            'shape':['sphere','cube','cylinder'],
+            'size':['large','small'],
+            'exist':['yes','no']
+        }
 
 def load_MAC(cfg, vocab):
     kwargs = {'vocab': vocab,
@@ -140,7 +148,7 @@ class ControlUnit(nn.Module):
         # compute attention distribution over words and summarize them accordingly
         logits = self.attn(interactions)
 
-        logits = self.mask_by_length(logits, question_lengths, device=context.device)
+        # logits = self.mask_by_length(logits, question_lengths, device=context.device)
         attn = F.softmax(logits, 1)
 
         # apply soft attention to current context words
@@ -269,18 +277,18 @@ class MACUnit(nn.Module):
 
 
 class InputUnit(nn.Module):
-    def __init__(self, cfg, vocab_size, wordvec_dim=300, rnn_dim=512, module_dim=512, bidirectional=True):
+    def __init__(self, cfg, vocab_size, attributes_dim=128, wordvec_dim=300, rnn_dim=512, module_dim=512, bidirectional=True):
         super(InputUnit, self).__init__()
 
         self.dim = module_dim
         self.cfg = cfg
 
-        self.stem = nn.Sequential(nn.Dropout(p=0.18),
-                                  nn.Conv2d(1024, module_dim, 3, 1, 1),
-                                  nn.ELU(),
-                                  nn.Dropout(p=0.18),
-                                  nn.Conv2d(module_dim, module_dim, kernel_size=3, stride=1, padding=1),
-                                  nn.ELU())
+        # self.stem = nn.Sequential(nn.Dropout(p=0.18),
+        #                           nn.Conv2d(1024, module_dim, 3, 1, 1),
+        #                           nn.ELU(),
+        #                           nn.Dropout(p=0.18),
+        #                           nn.Conv2d(module_dim, module_dim, kernel_size=3, stride=1, padding=1),
+        #                           nn.ELU())
 
         self.bidirectional = bidirectional
         if bidirectional:
@@ -291,13 +299,42 @@ class InputUnit(nn.Module):
         self.embedding_dropout = nn.Dropout(p=0.15)
         self.question_dropout = nn.Dropout(p=0.08)
 
-    def forward(self, image, question, question_len):
+        self.emb_color = nn.Embedding(len(classes['color']), attributes_dim)
+        self.emb_material = nn.Embedding(len(classes['material']), attributes_dim)
+        self.emb_shape = nn.Embedding(len(classes['shape']), attributes_dim)
+        self.emb_size = nn.Embedding(len(classes['size']), attributes_dim)
+        self.attributes = nn.Linear(attributes_dim * 4 + 3, module_dim)
+
+        self.learnable_objects = nn.Parameter(torch.randn(cfg.MODEL.INPUT_UNIT.NUM_LEARNABLE_OBJECTS, module_dim))
+
+
+    def forward(self, scene, question, question_len):
         b_size = question.size(0)
 
         # get image features
-        img = self.stem(image)
-        img = img.view(b_size, self.dim, -1)
-        img = img.permute(0,2,1)
+        # img = self.stem(image)
+        # img = img.view(b_size, self.dim, -1)
+        # img = img.permute(0,2,1)
+        coords = scene.data[:, :3]
+        color = scene.data[:, 3]
+        material = scene.data[:, 4]
+        shape = scene.data[:, 5]
+        size = scene.data[:, 6]
+        objects = self.attributes(torch.cat([
+            coords,
+            self.emb_color(color.to(torch.long)),
+            self.emb_material(material.to(torch.long)),
+            self.emb_shape(shape.to(torch.long)),
+            self.emb_size(size.to(torch.long))
+            ], -1))
+        scene = torch.nn.utils.rnn.PackedSequence(
+            objects,
+            scene.batch_sizes,
+            scene.sorted_indices,
+            scene.unsorted_indices,
+            )
+        scene, scene_length = torch.nn.utils.rnn.pad_packed_sequence(scene, batch_first=True)
+        scene = torch.cat([scene, self.learnable_objects.expand(b_size, *self.learnable_objects.size())], dim=1)
 
         # get question and contextual word embeddings
         embed = self.encoder_embed(question)
@@ -311,7 +348,7 @@ class InputUnit(nn.Module):
 
         contextual_words, _ = nn.utils.rnn.pad_packed_sequence(contextual_words, batch_first=True)
 
-        return question_embedding, contextual_words, img
+        return question_embedding, contextual_words, scene
 
 
 class OutputUnit(nn.Module):
@@ -352,9 +389,9 @@ class MACNetwork(nn.Module):
         nn.init.uniform_(self.input_unit.encoder_embed.weight, -1.0, 1.0)
         nn.init.normal_(self.mac.initial_memory)
 
-    def forward(self, image, question, question_len):
+    def forward(self, scene, question, question_len):
         # get image, word, and sentence embeddings
-        question_embedding, contextual_words, img = self.input_unit(image, question, question_len)
+        question_embedding, contextual_words, img = self.input_unit(scene, question, question_len)
 
         # apply MacCell
         memory = self.mac(contextual_words, question_embedding, img, question_len)
