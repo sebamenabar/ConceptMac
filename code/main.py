@@ -24,13 +24,14 @@ def parse_args():
     parser.add_argument('--gpu',  dest='gpu_id', type=str, default='0')
     parser.add_argument('--data_dir', dest='data_dir', type=str, default='')
     parser.add_argument('--manualSeed', type=int, help='manual seed')
+    parser.add_argument('--lobs', type=int, help='numbers of learnable objects')
     args = parser.parse_args()
     return args
 
 
-def set_logdir(max_steps):
+def set_logdir(max_steps, lobs):
     now = datetime.datetime.now(dateutil.tz.tzlocal())
-    logdir = "data/{}_max_steps_{}".format(now, max_steps)
+    logdir = "data/{}_max_steps_{}_lobs_{}".format(now, max_steps, lobs)
     mkdir_p(logdir)
     print("Saving output to: {}".format(logdir))
     code_dir = os.path.join(os.getcwd(), "code")
@@ -52,13 +53,15 @@ if __name__ == "__main__":
         cfg.DATA_DIR = args.data_dir
     if args.manualSeed is None:
         args.manualSeed = random.randint(1, 10000)
+    if args.lobs is not None:
+        cfg.MODEL.INPUT_UNIT.NUM_LEARNABLE_OBJECTS = args.lobs
     random.seed(args.manualSeed)
     torch.manual_seed(args.manualSeed)
     if cfg.CUDA:
         torch.cuda.manual_seed_all(args.manualSeed)
 
     if cfg.TRAIN.FLAG:
-        logdir = set_logdir(cfg.TRAIN.MAX_STEPS)
+        logdir = set_logdir(cfg.TRAIN.MAX_STEPS, cfg.MODEL.INPUT_UNIT.NUM_LEARNABLE_OBJECTS)
         trainer = Trainer(logdir, cfg)
         trainer.train()
     else:
