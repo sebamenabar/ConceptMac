@@ -16,7 +16,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from utils import mkdir_p, save_model, load_vocab
-from datasets import ClevrScenesDataset, scenes_collate_fn
+from datasets import ClevrDataset, collate_fn
 import mac
 from radam import RAdam
 
@@ -68,82 +68,24 @@ class Trainer():
         cudnn.benchmark = True
 
         # load dataset
-        # self.dataset = ClevrScenesDataset(
-        #     data_dir=self.data_dir,
-        #     scenes_dir=cfg.DATASET.SCENES_DIR,
-        #     split="train",
-        #     )
-        # self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
-        #                                num_workers=cfg.WORKERS, drop_last=True, collate_fn=scenes_collate_fn)
+        cogent = cfg.DATASET.congent
+        if not args.eval and not args.test:
+        self.dataset = ClevrDataset(data_dir=self.data_dir, split="train" + cogent)
+        self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
+                                       num_workers=cfg.WORKERS, drop_last=False, collate_fn=collate_fn)
 
-        # self.dataset_val = ClevrScenesDataset(
-        #     data_dir=self.data_dir,
-        #     scenes_dir=cfg.DATASET.SCENES_DIR,
-        #     split="val",
-        #     )
-        # self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=200, drop_last=True,
-        #                                  shuffle=False, num_workers=cfg.WORKERS, collate_fn=scenes_collate_fn)
-
-        cogent = cfg.DATASET.COGENT
-        if cogent:
-            print(f'Using CoGenT {cogent.upper()}')
-        sample = cfg.SAMPLE
-        if cfg.TRAIN.FLAG:
-            self.dataset = ClevrScenesDataset(
-                data_dir=self.data_dir,
-                scenes_dir=cfg.DATASET.SCENES_DIR,
-                split="train" + cogent,
-                sample=sample,
-                )
-            self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
-                                        num_workers=cfg.WORKERS, drop_last=True, collate_fn=scenes_collate_fn)
-        else:
-            self.dataset = []
-            self.dataloader = []
-
-        if cfg.TRAIN.FLAG or cfg.EVAL:
-            self.dataset_val = ClevrScenesDataset(
-                data_dir=self.data_dir,
-                scenes_dir=cfg.DATASET.SCENES_DIR,
-                split="val" + cogent,
-                sample=sample,
-                )
-            self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=cfg.TEST_BATCH_SIZE, drop_last=False,
-                                            shuffle=False, num_workers=cfg.WORKERS, collate_fn=scenes_collate_fn)
-
-        elif cfg.TEST:
-            self.dataset_val = ClevrScenesDataset(
-                data_dir=self.data_dir,
-                scenes_dir=cfg.DATASET.SCENES_DIR,
-                split="test" + cogent,
-                sample=sample,
-                )
-            self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=cfg.TEST_BATCH_SIZE, drop_last=False,
-                                            shuffle=False, num_workers=cfg.WORKERS, collate_fn=scenes_collate_fn)
+        self.dataset_val = ClevrDataset(data_dir=self.data_dir, split="val" + cogent)
+        self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=256, drop_last=False,
+                                         shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
 
         # load model
         self.vocab = load_vocab(cfg)
         self.model, self.model_ema = mac.load_MAC(cfg, self.vocab)
-            
-
         self.weight_moving_average(alpha=0)
         if cfg.TRAIN.RADAM:
             self.optimizer = RAdam(self.model.parameters(), lr=self.lr)
         else:
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-
-        self.start_epoch = 0
-        if cfg.resume_model:
-            location = 'cuda' if cfg.CUDA else 'cpu'
-            state = torch.load(cfg.resume_model, map_location=location)
-            self.model.load_state_dict(state['model'])
-            self.optimizer.load_state_dict(state['optim'])
-            self.start_epoch = state['iter'] + 1
-            state = torch.load(cfg.resume_model_ema, map_location=location)
-            self.model_ema.load_state_dict(state['model'])
-
-        if cfg.start_epoch is not None:
-            self.start_epoch = cfg.start_epoch
 
         self.previous_best_acc = 0.0
         self.previous_best_epoch = 0
@@ -159,9 +101,7 @@ class Trainer():
         pprint.pprint(self.cfg)
         print("\n")
 
-        pprint.pprint("Size of train dataset: {}".format(len(self.dataset)))
-        # print("\n")
-        pprint.pprint("Size of val dataset: {}".format(len(self.dataset_val)))
+        pprint.pprint("Size of dataset: {}".format(len(self.dataset)))
         print("\n")
 
         print("Using MAC-Model:")
@@ -207,25 +147,24 @@ class Trainer():
         self.labeled_data = iter(self.dataloader)
         self.set_mode("train")
 
-        dataset = tqdm(self.labeled_data, total=len(self.dataloader), ncols=20)
+        dataset = tqdm(self.labeled_data, total=len(self.dataloader))
 
         for data in dataset:
             ######################################################
             # (1) Prepare training data
             ######################################################
-            scenes, question, question_len, answer = data['scenes'], data['question'], data['question_length'], data['answer']
-            scene_len = data['scene_length'].long()
+            image, question, question_len, answer = data['image'], data['question'], data['question_length'], data['answer']
             answer = answer.long()
-            # question = Variable(question)
-            # answer = Variable(answer)
+            question = Variable(question)
+            answer = Variable(answer)
 
             if cfg.CUDA:
-                scenes = scenes.cuda()
+                image = image.cuda()
                 question = question.cuda()
                 answer = answer.cuda().squeeze()
             else:
                 question = question
-                scenes = scenes
+                image = image
                 answer = answer.squeeze()
 
             ############################
@@ -233,7 +172,7 @@ class Trainer():
             ############################
             self.optimizer.zero_grad()
 
-            scores = self.model(scenes, question, question_len, scene_len)
+            scores = self.model(image, question, question_len)
             loss = self.loss_fn(scores, answer)
             loss.backward()
 
@@ -268,6 +207,7 @@ class Trainer():
             )
 
         self.total_epoch_loss = avg_loss
+        print(self.total_epoch_loss)
 
         dict = {
             "avg_loss": avg_loss,
@@ -278,7 +218,7 @@ class Trainer():
     def train(self):
         cfg = self.cfg
         print("Start Training")
-        for epoch in range(self.start_epoch, self.max_epochs):
+        for epoch in range(self.max_epochs):
             dict = self.train_epoch(epoch)
             self.reduce_lr()
             self.log_results(epoch, dict)
@@ -289,7 +229,7 @@ class Trainer():
         self.save_models(self.max_epochs)
         self.writer.close()
         print("Finished Training")
-        print(f"Highest validation accuracy: {self.previous_best_acc} at epoch {self.previous_best_epoch}")
+        print("Highest validation accuracy: {} at epoch {}")
 
     def log_results(self, epoch, dict, max_eval_samples=None):
         epoch += 1
@@ -316,7 +256,7 @@ class Trainer():
         if mode == "train":
             loader = self.dataloader
             # num_imgs = len(self.dataset)
-        elif (mode == "validation") or (mode == 'test'):
+        elif mode == "validation":
             loader = self.dataloader_val
             # num_imgs = len(self.dataset_val)
 
@@ -332,8 +272,8 @@ class Trainer():
         total_correct_ema = 0
         total_samples = 0
         # all_accuracies_ema = []
-        pbar = tqdm(loader, total=len(loader), desc=mode.upper(), ncols=20)
-        for data in pbar:
+
+        for data in tqdm(loader, total=len(loader)):
             # try:
             #     data = next(eval_data)
             # except StopIteration:
@@ -341,20 +281,19 @@ class Trainer():
             # if max_iter is not None and _iteration == max_iter:
             #     break
 
-            scenes, question, question_len, answer = data['scenes'], data['question'], data['question_length'], data['answer']
+            image, question, question_len, answer = data['image'], data['question'], data['question_length'], data['answer']
             answer = answer.long()
-            scene_len = data['scene_length'].long()
-            # question = Variable(question)
-            # answer = Variable(answer)
+            question = Variable(question)
+            answer = Variable(answer)
 
             if self.cfg.CUDA:
-                scenes = scenes.cuda()
+                image = image.cuda()
                 question = question.cuda()
                 answer = answer.cuda().squeeze()
 
             with torch.no_grad():
-                scores = self.model(scenes, question, question_len, scene_len)
-                scores_ema = self.model_ema(scenes, question, question_len, scene_len)
+                scores = self.model(image, question, question_len)
+                scores_ema = self.model_ema(image, question, question_len)
 
             correct_ema = scores_ema.detach().argmax(1) == answer
             total_correct_ema += correct_ema.sum().cpu().item()
@@ -367,14 +306,6 @@ class Trainer():
             # accuracy = correct.sum().cpu().numpy() / answer.shape[0]
             # all_accuracies.append(accuracy)
             total_samples += answer.size(0)
-
-            # pbar.set_description(
-            #     'Avg Acc: {:.5f}; Avg Acc: {:.5f}'.format(total_correct / total_samples, total_correct_ema / total_samples)
-            # )
-            pbar.set_postfix({
-                'Acc': f'{total_correct / total_samples:.5f}',
-                'Ema Acc': f'{total_correct_ema / total_samples:.5f}',
-            })
 
         accuracy_ema = total_correct_ema / total_samples
         accuracy = total_correct / total_samples

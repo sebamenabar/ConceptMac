@@ -24,9 +24,14 @@ from config import cfg
 
 
 class ClevrDataset(data.Dataset):
-    def __init__(self, data_dir, split='train'):
+    def __init__(self, data_dir, split='train', sample=False):
 
-        with open(os.path.join(data_dir, '{}.pkl'.format(split)), 'rb') as f:
+        self.sample = sample
+        if sample:
+            sample = '_sample'
+        else:
+            sample = ''
+        with open(os.path.join(data_dir, '{}{}.pkl'.format(split, sample)), 'rb') as f:
             self.data = pickle.load(f)
         # self.img = h5py.File(os.path.join(data_dir, '{}_features.h5'.format(split)), 'r')['features']
         self.img = h5py.File(os.path.join(data_dir, '{}_features.hdf5'.format(split)), 'r')['data']
@@ -111,9 +116,14 @@ classes = {
         }
 
 class ClevrScenesDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir, scenes_dir, split='train'):
+    def __init__(self, data_dir, scenes_dir, split='train', sample=False):
 
-        with open(os.path.join(data_dir, '{}.pkl'.format(split)), 'rb') as f:
+        self.sample = sample
+        if sample:
+            sample = '_sample'
+        else:
+            sample = ''
+        with open(os.path.join(data_dir, '{}{}.pkl'.format(split, sample)), 'rb') as f:
             self.data = pickle.load(f)
         with open(os.path.join(scenes_dir, f'CLEVR_{split}_scenes.json'), 'r') as f:
             scenes = json.load(f)['scenes']
@@ -172,5 +182,5 @@ def scenes_collate_fn(batch):
     scenes = torch.nn.utils.rnn.pack_sequence(scenes, enforce_sorted=False, )
                 
     return {'scenes': scenes, 'question': torch.from_numpy(questions),
-            'scene_length': scenes_len,
+            'scene_length': torch.as_tensor(scenes_len, dtype=torch.float32),
             'answer': torch.LongTensor(answers), 'question_length': lengths}
