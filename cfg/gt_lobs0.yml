@@ -1,13 +1,14 @@
-GPU_ID: '-1'
+GPU_ID: '0'
 WORKERS: 1
-CUDA: False
+CUDA: True
+LOGDIR: 'gt0'
 
 TRAIN:
     FLAG: True
     LEARNING_RATE: 0.0004
     BATCH_SIZE: 256
-    MAX_EPOCHS: 200
-    SNAPSHOT_INTERVAL: 100
+    MAX_EPOCHS: 25
+    SNAPSHOT_INTERVAL: 5
     WEIGHT_INIT: "xavier_uniform"
     EALRY_STOPPING: True
     PATIENCE: 5
@@ -16,8 +17,8 @@ TRAIN:
     # MAX_STEPS: 4
 
 DATASET:
-    DATA_DIR: '/Users/sebamenabar/Documents/datasets/CLEVR/CLEVR_v1.0/data'
-    SCENES_DIR: '/Users/sebamenabar/Documents/datasets/CLEVR/CLEVR_v1.0/scenes/'
+    DATA_DIR: '/storage1/datasets/CLEVR_v1.0/features'
+    SCENES_DIR: '/storage1/datasets/CLEVR_v1.0/scenes'
 
 model:
     num_lobs: 0
@@ -30,7 +31,6 @@ model:
         rnn_dim: 256
         bidirectional: True
         separate_syntax_semantics_embeddings: False
-        # num_lobs: 0
     # control_unit:
     # read_unit:
     write_unit:
