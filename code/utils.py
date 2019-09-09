@@ -86,14 +86,15 @@ def load_vocab(cfg):
     return vocab
 
 
-def generateVarDpMask(shape, keepProb):
-    randomTensor = torch.tensor(keepProb).cuda().expand(shape)
-    randomTensor += nn.init.uniform_(torch.cuda.FloatTensor(shape[0], shape[1]))
+def generateVarDpMask(shape, keepProb, device=None):
+    randomTensor = torch.tensor(keepProb).expand(shape)
+    randomTensor = randomTensor + nn.init.uniform_(torch.FloatTensor(shape[0], shape[1]))
     binaryTensor = torch.floor(randomTensor)
-    mask = torch.cuda.FloatTensor(binaryTensor)
+    mask = torch.FloatTensor(binaryTensor)
+    mask = mask.to(device)
     return mask
 
 
 def applyVarDpMask(inp, mask, keepProb):
-    ret = (torch.div(inp, torch.tensor(keepProb).cuda())) * mask
+    ret = (torch.div(inp, torch.tensor(keepProb, device=inp.device))) * mask
     return ret

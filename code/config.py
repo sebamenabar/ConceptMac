@@ -46,6 +46,7 @@ __C.DATASET.SCENES_DIR = ''
 __C.DATASET.COGENT = ''
 # __C.DATASET = dict(__C.DATASET)
 __C.model = edict(
+    init_mem='random',
     max_step=4,
     num_lobs=0,
     separate_syntax_semantics=False,
@@ -55,11 +56,19 @@ __C.model = edict(
         rnn_dim=512,
         bidirectional=True,
         separate_syntax_semantics_embeddings=False,
-        # num_lobs=0,
+        stem_act='ELU',
         ),
-    control_unit=edict(),
+    control_unit=edict(
+        control_feed_prev=True,
+        control_cont_activation='TANH',
+    ),
     read_unit=edict(),
-    write_unit=edict(rtom=False),
+    write_unit=edict(
+        rtom=False,
+        self_attn=False,
+        gate=False,
+        gate_shared=True,
+        ),
     output_unit=edict(),
 )
 

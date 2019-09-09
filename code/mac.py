@@ -14,6 +14,14 @@ classes = {
             'exist':['yes','no']
         }
 
+acts = {
+    'RELU': nn.ReLU,
+    'ELU': nn.ELU,
+    'TANH': nn.Tanh,
+    'NONE': nn.Identity,
+}
+
+
 def load_MAC(cfg, vocab):
     kwargs = {'vocab': vocab,
               # 'max_step': cfg.TRAIN.MAX_STEPS
@@ -47,11 +55,19 @@ class ControlUnit(nn.Module):
                  module_dim,
                  max_step=4,
                  separate_syntax_semantics=False,
+                 control_feed_prev=True,
+                 control_cont_activation='TANH'
                 ):
         super().__init__()
         self.attn = nn.Linear(module_dim, 1)
-        # self.control_input = nn.Sequential(nn.Linear(module_dim, module_dim),
-        #                                    nn.Tanh())
+        self.control_input = nn.Sequential(nn.Linear(module_dim, module_dim),
+                                           nn.Tanh())
+        if control_feed_prev:
+            self.cont_control = nn.Linear(2 * module_dim, module_dim)
+            self.cont_control_act = acts[control_cont_activation]()
+        else:
+            self.cont_control = None
+            self.cont_control_act = None
         self.cw_attn = nn.Identity()
 
         self.control_input_u = nn.ModuleList()
@@ -59,6 +75,7 @@ class ControlUnit(nn.Module):
             self.control_input_u.append(nn.Linear(module_dim, module_dim))
 
         self.module_dim = module_dim
+        self.control_feed_prev = control_feed_prev
         self.separate_syntax_semantics = separate_syntax_semantics
 
     def mask(self, question_lengths, device):
@@ -79,7 +96,7 @@ class ControlUnit(nn.Module):
 
         return x_masked
 
-    def forward(self, question, context, question_lengths, step):
+    def forward(self, question, context, question_lengths, step, prev_control=None):
         """
         Args:
             question: external inputs to control unit (the question vector).
@@ -91,16 +108,21 @@ class ControlUnit(nn.Module):
                 [batchSize]
             step: which step in the reasoning chain
         """
-        # compute interactions with question words
-        # question = self.control_input(question)
         if self.separate_syntax_semantics:
             syntactics, semantics = context
         else:
-            syntactics, semantics = context, context
+            syntactics = semantics = context
 
+        # compute interactions with question words
+        question = self.control_input(question)
         question = self.control_input_u[step](question)
 
-        newContControl = question
+        if self.control_feed_prev:
+            newContControl = self.cont_control(torch.cat((prev_control, question), dim=1))
+            newContControl = self.cont_control_act(newContControl)
+        else:
+            newContControl = question
+
         newContControl = torch.unsqueeze(newContControl, 1)
         interactions = newContControl * syntactics
 
@@ -122,7 +144,7 @@ class ReadUnit(nn.Module):
         super().__init__()
 
         self.concat = nn.Linear(module_dim * 2, module_dim)
-        self.concat_2 = nn.Linear(module_dim, module_dim)
+        # self.concat_2 = nn.Linear(module_dim, module_dim)
         self.attn = nn.Linear(module_dim, 1)
         self.dropout = nn.Dropout(0.15)
         self.kproj = nn.Linear(module_dim, module_dim)
@@ -130,7 +152,7 @@ class ReadUnit(nn.Module):
 
         self.activation = nn.ELU()
         self.module_dim = module_dim
-        self.kb_attn = nn.Identity()
+        self.kb_attn_id = nn.Identity()
         self.num_lobs = num_lobs
 
 
@@ -166,7 +188,7 @@ class ReadUnit(nn.Module):
         interactions = torch.cat([interactions, know_proj], -1)
         interactions = self.concat(interactions)
         interactions = self.activation(interactions)
-        interactions = self.concat_2(interactions)
+        # interactions = self.concat_2(interactions)
 
         ## Step 2: compute interactions with control
         control = control.unsqueeze(1)
@@ -181,7 +203,7 @@ class ReadUnit(nn.Module):
         attn = mask_by_length(attn, scene_len + self.num_lobs, attn.device)
         attn = attn.squeeze(-1)
         attn = F.softmax(attn, 1)
-        attn = self.kb_attn(attn)
+        attn = self.kb_attn_id(attn)
 
         # sum up the knowledge base according to the distribution
         attn = attn.unsqueeze(-1)
@@ -191,20 +213,64 @@ class ReadUnit(nn.Module):
 
 
 class WriteUnit(nn.Module):
-    def __init__(self, module_dim, rtom=True):
+    def __init__(
+        self,
+        module_dim,
+        rtom=True,
+        self_attn=False,
+        gate=False,
+        gate_shared=False,
+    ):
         super().__init__()
         self.rtom = rtom
+        self.self_attn = self_attn
+        self.gate = gate
+        self.gate_shared = gate_shared
         if self.rtom is False:
             self.linear = nn.Linear(module_dim * 2, module_dim)
+            if self_attn:
+                self.linear = nn.Linear(module_dim * 3, module_dim)
+                self.ctrl_attn_proj = nn.Linear(module_dim, module_dim)
+                self.ctrl_attn_linear = nn.Linear(module_dim, 1)
+            else:
+                self.linear = nn.Linear(module_dim * 2, module_dim)
+                self.ctrl_attn_proj = None
+                self.ctrl_attn_linear = None
+            if gate:
+                if gate_shared:
+                    dim_gate_out = 1
+                else:
+                    dim_gate_out = module_dim
+                self.ctrl_gate_linear = nn.Linear(module_dim, dim_gate_out)
+            else:
+                sel.ctrl_gate_linear = None
         else:
             self.linear = None
+
         
-    def forward(self, memory, info):
+    def forward(self, memory, info, control=None, prev_controls=None, prev_memories=None):
         if self.rtom:
             newMemory = info
         else:
             newMemory = torch.cat([memory, info], -1)
+
+            if self.self_attn:
+                control = self.ctrl_attn_proj(control)
+                prev_controls = torch.cat(prev_controls, dim=1)
+                interactions = prev_controls * control.unsqueeze(1)
+                attn = self.ctrl_attn_linear(interactions).squeeze(-1)
+                attn = F.softmax(attn, 1).unsqueeze(-1)
+                prev_memories = torch.cat(prev_memories, dim=1)
+                self_smry = (attn * prev_memories).sum(1)
+                
+                newMemory = torch.cat([newMemory, self_smry], dim=-1)
+            
             newMemory = self.linear(newMemory)
+
+            if self.gate:
+                control = self.ctrl_gate_linear(control)
+                z = F.sigmoid(control)
+                newMemory = newMemory * z + memory * (1 - z)
 
         return newMemory
 
@@ -234,7 +300,11 @@ class MACUnit(nn.Module):
                 **units_cfg.write_unit,
             })
 
-        self.initial_memory = nn.Parameter(torch.zeros(1, module_dim))
+        self.initial_memory = nn.Parameter(torch.FloatTensor(1, module_dim))
+        if cfg.model.init_mem == 'random':
+            self.initial_memory.data.normal_()
+        else:
+            self.initial_memory.data.zero_()
 
         self.module_dim = module_dim
         self.max_step = max_step
@@ -253,31 +323,40 @@ class MACUnit(nn.Module):
     def forward(self, context, question, knowledge, question_lengths, scene_len):
         batch_size = question.size(0)
         control, memory, memDpMask = self.zero_state(batch_size, question)
+        controls = [control.unsqueeze(1)]
+        memories = [memory.unsqueeze(1)]
 
         for i in range(self.max_step):
             # control unit
-            control = self.control(question, context, question_lengths, i)
+
+            control = self.control(question, context, question_lengths, i, prev_control=control)
             # read unit
             info = self.read(memory, knowledge, control, scene_len, memDpMask)
             # write unit
-            memory = self.write(memory, info)
+            memory = self.write(memory, info, control,
+                    prev_controls=controls, prev_memories=memories,
+                )
+
+            # For write self attn
+            controls.append(control.unsqueeze(1))
+            memories.append(memory.unsqueeze(1))
 
         return memory
 
 
 class InputUnit(nn.Module):
-    def __init__(
-            self,
-            vocab_size,
-            num_lobs=0,
-            attributes_dim=128,
-            wordvec_dim=300,
-            rnn_dim=512,
-            module_dim=512,
-            bidirectional=True,
-            separate_syntax_semantics=False,
-            separate_syntax_semantics_embeddings=False,
-        ):
+    def __init__(self,
+                 vocab_size,
+                 num_lobs=0,
+                 wordvec_dim=300,
+                 attributes_dim=128,
+                 rnn_dim=512,
+                 module_dim=512,
+                 bidirectional=True,
+                 separate_syntax_semantics=False,
+                 separate_syntax_semantics_embeddings=False,
+                 stem_act='ELU',
+                ):
         super(InputUnit, self).__init__()
 
         self.dim = module_dim
@@ -300,6 +379,7 @@ class InputUnit(nn.Module):
         if self.separate_syntax_semantics_embeddings:
             wordvec_dim *= 2
         self.encoder_embed = nn.Embedding(vocab_size, wordvec_dim)
+        self.encoder_embed.weight.data.uniform_(-1, 1)
         self.embedding_dropout = nn.Dropout(p=0.15)
         self.question_dropout = nn.Dropout(p=0.08)
 
