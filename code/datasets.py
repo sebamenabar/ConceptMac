@@ -127,6 +127,7 @@ class ClevrScenesDataset(torch.utils.data.Dataset):
             self.data = pickle.load(f)
         with open(os.path.join(scenes_dir, f'CLEVR_{split}_scenes.json'), 'r') as f:
             scenes = json.load(f)['scenes']
+        self.scenes = scenes
         # self.img = h5py.File(os.path.join(data_dir, '{}_features.h5'.format(split)), 'r')['features']
         # self.img = h5py.File(os.path.join(data_dir, '{}_features.hdf5'.format(split)), 'r')['data']
 
