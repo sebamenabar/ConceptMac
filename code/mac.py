@@ -68,7 +68,7 @@ class ControlUnit(nn.Module):
         else:
             self.cont_control = None
             self.cont_control_act = None
-        self.cw_attn = nn.Identity()
+        self.cw_attn_idty = nn.Identity()
 
         self.control_input_u = nn.ModuleList()
         for i in range(max_step):
@@ -131,7 +131,7 @@ class ControlUnit(nn.Module):
 
         logits = self.mask_by_length(logits, question_lengths, device=syntactics.device)
         attn = F.softmax(logits, 1)
-        attn = self.cw_attn(attn)
+        attn = self.cw_attn_idty(attn)
 
         # apply soft attention to current context words
         next_control = (attn * semantics).sum(1)
@@ -152,7 +152,7 @@ class ReadUnit(nn.Module):
 
         self.activation = nn.ELU()
         self.module_dim = module_dim
-        self.kb_attn_id = nn.Identity()
+        self.kb_attn_idty = nn.Identity()
         self.num_lobs = num_lobs
 
 
@@ -203,7 +203,7 @@ class ReadUnit(nn.Module):
         attn = mask_by_length(attn, scene_len + self.num_lobs, attn.device)
         attn = attn.squeeze(-1)
         attn = F.softmax(attn, 1)
-        attn = self.kb_attn_id(attn)
+        attn = self.kb_attn_idty(attn)
 
         # sum up the knowledge base according to the distribution
         attn = attn.unsqueeze(-1)
