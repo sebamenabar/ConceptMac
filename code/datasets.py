@@ -3,22 +3,25 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os
+import os.path
+
+import re
+import json
+import glob
+import pickle
+import random
+from pathlib import Path
+
+import h5py
+import numpy as np
+
+import PIL
+from PIL import Image
+
 import torch
 import torch.utils.data as data
 import torchvision.transforms as transforms
-from PIL import Image
-import PIL
-import os
-import os.path
-import pickle
-import random
-import numpy as np
-import glob
-from pathlib import Path
-import json
-import h5py
-import re
-import random
 
 from config import cfg
 

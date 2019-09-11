@@ -1,21 +1,28 @@
 from __future__ import print_function
-import torch
 
-import argparse
 import os
-import random
 import sys
+
+import random
+import shutil
+import argparse
 import datetime
 import dateutil
 import dateutil.tz
-import shutil
 
-dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
-sys.path.append(dir_path)
+import comet_ml
+from dotenv import load_dotenv
 
-from config import cfg, cfg_from_file
+import torch
+
+# dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
+# sys.path.append(dir_path)
+
 from utils import mkdir_p
 from trainer import Trainer
+from config import cfg, cfg_from_file
+
+load_dotenv()
 
 
 def parse_args():
@@ -36,6 +43,7 @@ def parse_args():
     parser.add_argument('--start-epoch', type=int)
     parser.add_argument('--epochs', type=int)
     parser.add_argument('--workers', type=int)
+    parser.add_argument('--logcomet', action='store_true')
     args = parser.parse_args()
     return args
 
@@ -59,6 +67,7 @@ def set_logdir(max_steps, lobs, logdir=None):
 
 if __name__ == "__main__":
     args = parse_args()
+    cfg.logcomet = args.logcomet
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
     if args.gpu_id != -1:
@@ -85,6 +94,10 @@ if __name__ == "__main__":
         cfg.TRAIN.MAX_EPOCHS = args.epochs
     if args.workers is not None:
         cfg.WORKERS = args.workers
+    if args.logdir:
+        cfg.LOGDIR = args.logdir
+
+    cfg.exp_name = cfg.LOGDIR
 
     cfg.SAMPLE = args.sample
     random.seed(args.manualSeed)
@@ -100,19 +113,21 @@ if __name__ == "__main__":
     cfg.EVAL = args.eval
     print(cfg)
 
-    logdir = set_logdir(cfg.model.max_step, cfg.model.num_lobs, cfg.LOGDIR or args.logdir)
+    logdir = set_logdir(cfg.model.max_step, cfg.model.num_lobs, cfg.LOGDIR)
     trainer = Trainer(logdir, cfg)
 
     if cfg.TRAIN.FLAG:
-        # logdir = set_logdir(cfg.model.max_step)
-        # trainer = Trainer(logdir, cfg)
         trainer.train()
     elif cfg.EVAL or cfg.TEST:
         mode = 'validation' if cfg.EVAL else 'test'
-        accuracy, accuracy_ema = trainer.calc_accuracy(mode)
+        trainer.comet_exp.disable_mp()
+        metrics = trainer.calc_accuracy(mode)
 
-        print(f'Acc: {accuracy:.4f}')
-        print(f'Acc EMA: {accuracy_ema:.4f}')
+        print('Acc: {:.4f}'.format(metrics['acc']))
+        print('Acc EMA: {:.4f}'.format(metrics['acc_ema']))
+
+        print('Loss: {:.4f}'.format(metrics['loss']))
+        print('Loss EMA: {:.4f}'.format(metrics['loss_ema']))
 
     # elif cfg.TEST:
     #     accuracy, accuracy_ema = trainer.calc_accuracy('test')

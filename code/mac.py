@@ -155,7 +155,6 @@ class ReadUnit(nn.Module):
         self.kb_attn_idty = nn.Identity()
         self.num_lobs = num_lobs
 
-
     def forward(self, memory, know, control, scene_len, memDpMask=None):
         """
         Args:

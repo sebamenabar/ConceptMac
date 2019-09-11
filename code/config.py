@@ -2,7 +2,9 @@ from __future__ import division
 from __future__ import print_function
 
 import os.path as osp
+
 import numpy as np
+
 from easydict import EasyDict as edict
 
 
@@ -67,7 +69,7 @@ __C.model = edict(
         rtom=False,
         self_attn=False,
         gate=False,
-        gate_shared=True,
+        gate_shared=False,
         ),
     output_unit=edict(),
 )

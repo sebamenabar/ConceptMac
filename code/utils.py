@@ -1,18 +1,20 @@
 import os
-import errno
-import numpy as np
+
 import glob
+import errno
 import pickle
-
 from copy import deepcopy
-from config import cfg
 
-from torch.nn import init
+import numpy as np
+
 import torch
-from torch.autograd import Variable
 import torch.nn as nn
-from torch.nn import functional as F
+from torch.nn import init
 import torchvision.utils as vutils
+from torch.autograd import Variable
+from torch.nn import functional as F
+
+from config import cfg
 
 
 def save_model(model, optim, iter, model_dir, max_to_keep=None, model_name=""):
@@ -98,3 +100,39 @@ def generateVarDpMask(shape, keepProb, device=None):
 def applyVarDpMask(inp, mask, keepProb):
     ret = (torch.div(inp, torch.tensor(keepProb, device=inp.device))) * mask
     return ret
+
+def cfg_to_exp_name(cfg):
+    bsz = cfg.TRAIN.BATCH_SIZE
+    lr = cfg.TRAIN.LEARNING_RATE
+    module_dim = cfg.model.common.module_dim
+    max_step = cfg.model.max_step
+    sss = 'sss' if cfg.model.separate_syntax_semantics else ''
+    if len(sss) and cfg.model.input_unit.separate_syntax_semantics_embeddings:
+        sss += 'e'
+    control_feed_prev = cfg.model.control_unit.control_feed_prev
+    
+    if cfg.model.write_unit.rtom:
+        write = 'rtom'
+    else:
+        write = ''
+        if cfg.model.write_unit.self_attn:
+            write += 'sa'
+        if cfg.model.write_unit.gate:
+            write += 'g'
+            if cfg.model.write_unit.gate_shared:
+                write += 's'
+            else:
+                write += 'u'
+    
+    exp_name = f'{max_step}_{module_dim}'
+    if sss:
+        exp_name += f'_{sss}'
+    if control_feed_prev:
+        exp_name += f'_cfp'
+    exp_name += f'_{write}'
+
+    exp_name += f'_bsz{bsz}_lr{lr}'
+
+    return exp_name
+            
+        

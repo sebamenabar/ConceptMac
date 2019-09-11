@@ -1,24 +1,27 @@
 from __future__ import print_function
 
-import sys
 import os
+import sys
+
 import shutil
 from six.moves import range
-import pprint
-from tqdm import tqdm
 
-from tensorboardX import SummaryWriter
-import torch.backends.cudnn as cudnn
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import torch.optim as optim
+from torch.autograd import Variable
+import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 
-from utils import mkdir_p, save_model, load_vocab
-from datasets import ClevrScenesDataset, scenes_collate_fn
-import mac
+import pprint
+from tqdm import tqdm
+from comet_ml import Experiment
+from tensorboardX import SummaryWriter
+
+import mac as mac
 from radam import RAdam
+from datasets import ClevrScenesDataset, scenes_collate_fn
+from utils import mkdir_p, save_model, load_vocab, cfg_to_exp_name
 
 
 class Logger(object):
@@ -51,7 +54,8 @@ class Trainer():
             mkdir_p(self.model_dir)
             mkdir_p(self.log_dir)
             self.writer = SummaryWriter(log_dir=self.log_dir)
-            sys.stdout = Logger(logfile=os.path.join(self.path, "logfile.log"))
+            self.logfile = os.path.join(self.path, "logfile.log")
+            sys.stdout = Logger(logfile=self.logfile)
 
         self.data_dir = cfg.DATASET.DATA_DIR
         self.max_epochs = cfg.TRAIN.MAX_EPOCHS
@@ -125,7 +129,6 @@ class Trainer():
         self.vocab = load_vocab(cfg)
         self.model, self.model_ema = mac.load_MAC(cfg, self.vocab)
             
-
         self.weight_moving_average(alpha=0)
         if cfg.TRAIN.RADAM:
             self.optimizer = RAdam(self.model.parameters(), lr=self.lr)
@@ -153,6 +156,19 @@ class Trainer():
 
         self.print_info()
         self.loss_fn = torch.nn.CrossEntropyLoss().cuda()
+
+        self.comet_exp = Experiment(
+            project_name=os.getenv('COMET_PROJECT_NAME'),
+            api_key=os.getenv('COMET_API_KEY'),
+            workspace=os.getenv('COMET_WORKSPACE'),
+            disabled=cfg.logcomet is False,
+        )
+        exp_name = cfg_to_exp_name(cfg)
+        print(exp_name)
+        self.comet_exp.set_name(exp_name)
+        self.comet_exp.log_parameters(cfg)
+        self.comet_exp.log_asset(self.logfile)
+        self.comet_exp.set_model_graph(str(self.model))
 
     def print_info(self):
         print('Using config:')
@@ -200,7 +216,7 @@ class Trainer():
 
     def train_epoch(self, epoch):
         cfg = self.cfg
-        total_loss = 0
+        total_loss = 0.
         total_correct = 0
         total_samples = 0
 
@@ -270,8 +286,8 @@ class Trainer():
         self.total_epoch_loss = avg_loss
 
         dict = {
-            "avg_loss": avg_loss,
-            "train_accuracy": train_accuracy
+            "loss": avg_loss,
+            "accuracy": train_accuracy
         }
         return dict
 
@@ -279,9 +295,21 @@ class Trainer():
         cfg = self.cfg
         print("Start Training")
         for epoch in range(self.start_epoch, self.max_epochs):
-            dict = self.train_epoch(epoch)
-            self.reduce_lr()
-            self.log_results(epoch, dict)
+
+            with self.comet_exp.train():
+                dict = self.train_epoch(epoch)
+                self.reduce_lr()
+                dict['epoch'] = epoch
+                dict['lr'] = self.lr
+                self.comet_exp.log_metrics(dict, epoch=epoch,)
+
+            with self.comet_exp.validate():
+                dict = self.log_results(epoch, dict)
+                dict['epoch'] = epoch
+                dict['lr'] = self.lr
+                self.comet_exp.log_metrics(dict, epoch=epoch,)
+
+
             if cfg.TRAIN.EALRY_STOPPING:
                 if epoch - cfg.TRAIN.PATIENCE == self.previous_best_epoch:
                     break
@@ -293,53 +321,42 @@ class Trainer():
 
     def log_results(self, epoch, dict, max_eval_samples=None):
         epoch += 1
-        self.writer.add_scalar("avg_loss", dict["avg_loss"], epoch)
-        self.writer.add_scalar("train_accuracy", dict["train_accuracy"], epoch)
+        self.writer.add_scalar("avg_loss", dict["loss"], epoch)
+        self.writer.add_scalar("train_accuracy", dict["accuracy"], epoch)
 
-        val_accuracy, val_accuracy_ema = self.calc_accuracy("validation", max_samples=max_eval_samples)
-        self.writer.add_scalar("val_accuracy_ema", val_accuracy_ema, epoch)
-        self.writer.add_scalar("val_accuracy", val_accuracy, epoch)
+        metrics = self.calc_accuracy("validation", max_samples=max_eval_samples)
+        self.writer.add_scalar("val_accuracy_ema", metrics['acc_ema'], epoch)
+        self.writer.add_scalar("val_accuracy", metrics['acc'], epoch)
+        self.writer.add_scalar("val_loss_ema", metrics['loss_ema'], epoch)
+        self.writer.add_scalar("val_loss", metrics['loss'], epoch)
 
-        print("Epoch: {}\tVal Acc: {},\tVal Acc EMA: {},\tAvg Loss: {},\tLR: {}".
-              format(epoch, val_accuracy, val_accuracy_ema, dict["avg_loss"], self.lr))
+        print("Epoch: {epoch}\tVal Acc: {acc},\tVal Acc EMA: {acc_ema},\tAvg Loss: {loss},\tAvg Loss EMA: {loss_ema},\tLR: {lr}".
+              format(epoch=epoch, lr=self.lr, **metrics))
 
-        if val_accuracy > self.previous_best_acc:
-            self.previous_best_acc = val_accuracy
+        if metrics['acc'] > self.previous_best_acc:
+            self.previous_best_acc = metrics['acc']
             self.previous_best_epoch = epoch
 
         if epoch % self.snapshot_interval == 0:
             self.save_models(epoch)
+
+        return metrics
 
     def calc_accuracy(self, mode="train", max_samples=None):
         self.set_mode("validation")
 
         if mode == "train":
             loader = self.dataloader
-            # num_imgs = len(self.dataset)
         elif (mode == "validation") or (mode == 'test'):
             loader = self.dataloader_val
-            # num_imgs = len(self.dataset_val)
 
-        # batch_size = 256
-        # total_iters = num_imgs // batch_size
-        # if max_samples is not None:
-        #     max_iter = max_samples // batch_size
-        # else:
-        #     max_iter = None
-
-        # all_accuracies = []
         total_correct = 0
         total_correct_ema = 0
         total_samples = 0
-        # all_accuracies_ema = []
+        total_loss = 0.
+        total_loss_ema = 0.
         pbar = tqdm(loader, total=len(loader), desc=mode.upper(), ncols=20)
         for data in pbar:
-            # try:
-            #     data = next(eval_data)
-            # except StopIteration:
-            #     break
-            # if max_iter is not None and _iteration == max_iter:
-            #     break
 
             scenes, question, question_len, answer = data['scenes'], data['question'], data['question_length'], data['answer']
             answer = answer.long()
@@ -356,27 +373,41 @@ class Trainer():
                 scores = self.model(scenes, question, question_len, scene_len)
                 scores_ema = self.model_ema(scenes, question, question_len, scene_len)
 
-            correct_ema = scores_ema.detach().argmax(1) == answer
-            total_correct_ema += correct_ema.sum().cpu().item()
-            # accuracy_ema = correct_ema.sum().cpu().numpy() / answer.shape[0]
+                loss = self.loss_fn(scores, answer)
+                loss_ema = self.loss_fn(scores_ema, answer)
 
-            # all_accuracies_ema.append(accuracy_ema)
 
             correct = scores.detach().argmax(1) == answer
+            correct_ema = scores_ema.detach().argmax(1) == answer
+
             total_correct += correct.sum().cpu().item()
-            # accuracy = correct.sum().cpu().numpy() / answer.shape[0]
-            # all_accuracies.append(accuracy)
+            total_correct_ema += correct_ema.sum().cpu().item()
+
+            total_loss += loss.item() * answer.size(0)
+            total_loss_ema += loss_ema.item() * answer.size(0)
+
             total_samples += answer.size(0)
 
-            # pbar.set_description(
-            #     'Avg Acc: {:.5f}; Avg Acc: {:.5f}'.format(total_correct / total_samples, total_correct_ema / total_samples)
-            # )
+            avg_acc = total_correct / total_samples
+            avg_acc_ema = total_correct_ema / total_samples
+            avg_loss = total_loss / total_samples
+            avg_loss_ema = total_loss_ema / total_samples
+            
             pbar.set_postfix({
-                'Acc': f'{total_correct / total_samples:.5f}',
-                'Ema Acc': f'{total_correct_ema / total_samples:.5f}',
+                'Acc': f'{avg_acc:.5f}',
+                'Acc Ema': f'{avg_acc_ema:.5f}',
+                'Loss': f'{avg_loss:.5f}',
+                'Loss Ema': f'{avg_loss_ema:.5f}',
             })
 
-        accuracy_ema = total_correct_ema / total_samples
-        accuracy = total_correct / total_samples
+        return dict(
+            acc=avg_acc,
+            acc_ema=avg_acc_ema,
+            loss=avg_loss,
+            loss_ema=avg_loss_ema
+        )
 
-        return accuracy, accuracy_ema
+        # accuracy_ema = total_correct_ema / total_samples
+        # accuracy = total_correct / total_samples
+
+        # return accuracy, accuracy_ema
