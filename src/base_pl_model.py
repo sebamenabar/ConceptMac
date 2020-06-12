@@ -11,7 +11,7 @@ from datetime import datetime as dt
 from pytorch_lightning.utilities.distributed import rank_zero_only
 import pytorch_lightning as pl
 
-from config import mkdir_p
+from base_config import mkdir_p
 
 _plt = None
 
@@ -45,6 +45,9 @@ class BasePLModel(pl.LightningModule):
         #     self.load_from_checkpoint(hparams.resume)
         self.cfg = hparams
         self.comet_set = False
+        self._run_name = None
+        self.work_dir = osp.dirname(osp.dirname(osp.realpath(__file__)))
+        self.exp_dir = ""
 
     @property
     def use_cuda(self):
@@ -56,17 +59,25 @@ class BasePLModel(pl.LightningModule):
                 self.set_comet_graph()
                 self.log_src_comet()
                 self.log_cfg_comet()
-                self.print("\nSent src and config to comet")
+                # self.print("\nSent src and config to comet")
             self.comet_set = True  # Avoiding calling each time epoch starts
 
         return super().on_epoch_start()
+
+    @property
+    def loggers(self):
+        if self.logger:
+            if isinstance(self.logger, pl.loggers.base.LoggerCollection):
+                return self.logger
+            else:
+                return [self.logger]
 
     @property
     def comet_logger(self):
         comet_logger = getattr(self, "_comet_logger", None)
         if comet_logger:
             return comet_logger
-        for logger in self.logger:
+        for logger in self.loggers:
             if isinstance(logger, pl.loggers.CometLogger):
                 self._comet_logger = logger
                 return logger
@@ -82,17 +93,23 @@ class BasePLModel(pl.LightningModule):
             self.comet_logger.experiment.log_asset_folder(
                 osp.join(self.work_dir, "src"), recursive=True, log_file_name=True
             )
+            print("Sent src to comet")
 
     @rank_zero_only
     def log_cfg_comet(self):
-        if self.cfg.logcomet:
+        if self.cfg.logcomet and len(self.exp_dir):
             self.comet_logger.experiment.log_asset(osp.join(self.exp_dir, "cfg.json"))
             self.comet_logger.experiment.log_asset(osp.join(self.exp_dir, "cfg.yml"))
+            if os.path.exists(osp.join(self.exp_dir, "args.json")):
+                self.comet_logger.experiment.log_asset(
+                    osp.join(self.exp_dir, "args.json")
+                )
+            print("Sent config to comet")
 
     @rank_zero_only
     def log_figure(self, figure, name, step=None, close=True):
         if self.logger:
-            for logger in self.logger:
+            for logger in self.loggers:
                 if type(logger) is pl.loggers.TensorBoardLogger:
                     logger.experiment.add_figure(
                         name, figure, global_step=step, close=False
@@ -109,45 +126,53 @@ class BasePLModel(pl.LightningModule):
             plt = _plt
             plt.close(figure)
 
-    def make_lightning_loggers_ckpt(self, ckpt_callback_kwargs=dict(
-            # filepath=osp.join(self.exp_dir, "checkpoints/"),
-            monitor="val_loss",
-            verbose=True,
-            save_top_k=2,
+    @property
+    def run_name(self):
+        if self._run_name:
+            return self._run_name
+        return ""
 
-    )):
+    def make_comet_logger(self):
+        return pl.loggers.CometLogger(
+            api_key=os.environ["COMET_API_KEY"],
+            workspace=self.cfg.comet_workspace,
+            project_name=self.cfg.comet_project_name,
+            experiment_name=self.run_name,
+        )
+
+    # def make_lightning_loggers_ckpt(
+    def make_lightning_loggers(
+        self,
+        # ckpt_callback_kwargs=dict(
+        #     # filepath=osp.join(self.exp_dir, "checkpoints/"),
+        #     monitor="val_loss",
+        #     verbose=True,
+        #     save_top_k=2,
+        # ),
+    ):
         loggers = [pl.loggers.TensorBoardLogger(save_dir=self.exp_dir, name="",)]
         if self.cfg.logcomet:
-            comet_logger = pl.loggers.CometLogger(
-                api_key=os.environ["COMET_API_KEY"],
-                workspace=self.cfg.comet_workspace,
-                project_name=self.cfg.comet_project_name,
-                experiment_name=self.run_name,
-            )
-            loggers.append(comet_logger)
+            loggers.append(self.make_comet_logger())
 
-        default_ckpt_callback_kwargs = {
-            'filepath': osp.join(self.exp_dir, "checkpoints/"),
-        }
-        default_ckpt_callback_kwargs.update(ckpt_callback_kwargs)
-        ckpt_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
-            **default_ckpt_callback_kwargs,
-        )
-        return loggers, ckpt_callback
-
+        # default_ckpt_callback_kwargs = {
+        #     "filepath": osp.join(self.exp_dir, "checkpoints/"),
+        # }
+        # default_ckpt_callback_kwargs.update(ckpt_callback_kwargs)
+        # ckpt_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
+        #     **default_ckpt_callback_kwargs,
+        # )
+        return loggers  # , ckpt_callback
 
     @rank_zero_only
-    def init_log(self):
+    def init_log(self, args=None):
         now = dt.now(tz.tzlocal())
         now = now.strftime("%m-%d-%Y-%H-%M-%S")
         log_dir = self.cfg.exp_name
         run_name = self.cfg.run_name
         if run_name == "" or run_name is None:
             run_name = now
-        self.run_name = run_name
-        work_dir = osp.dirname(osp.dirname(osp.realpath(__file__)))
-        self.work_dir = work_dir
-        exp_dir = osp.join(work_dir, "experiments", log_dir, run_name)
+        self._run_name = run_name
+        exp_dir = osp.join(self.work_dir, "experiments", log_dir, run_name)
         _exp_dir = exp_dir
         i = 2
         while os.path.exists(_exp_dir):
@@ -157,8 +182,8 @@ class BasePLModel(pl.LightningModule):
 
         self.exp_dir = exp_dir
         shutil.copytree(
-            osp.join(work_dir, "src"),
-            osp.join(exp_dir, "src"),
+            osp.join(self.work_dir, "src"),
+            osp.join(self.exp_dir, "src"),
             ignore=shutil.ignore_patterns(".*", "__pycache__", ".DS_Store"),
         )
 
@@ -169,6 +194,9 @@ class BasePLModel(pl.LightningModule):
             json.dump(self.cfg, f, indent=4)
         with open(osp.join(self.exp_dir, "cfg.yml"), "w") as f:
             yaml.dump(json.loads(json.dumps(self.cfg)), f, indent=4)
+        if args is not None:
+            with open(osp.join(self.exp_dir, "args.json"), "w") as f:
+                json.dump(args, f, indent=4)
 
         # print(exp_dir)
 

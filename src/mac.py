@@ -308,31 +308,31 @@ class WriteUnit(nn.Module):
 
 
 class MACUnit(nn.Module):
-    def __init__(self, units_cfg, module_dim=512, max_step=4):
+    def __init__(self, cfg, module_dim=512, max_step=4):
         super().__init__()
         self.cfg = cfg
         self.control = ControlUnit(
             **{
                 'module_dim': module_dim,
                 'max_step': max_step,
-                **units_cfg.common,
-                **units_cfg.control_unit
+                **cfg.common,
+                **cfg.control_unit
             })
         self.read = ReadUnit(
             **{
                 'module_dim': module_dim,
-                **units_cfg.common,
-                **units_cfg.read_unit,
+                **cfg.common,
+                **cfg.read_unit,
             })
         self.write = WriteUnit(
             **{
                 'module_dim': module_dim,
-                **units_cfg.common,
-                **units_cfg.write_unit,
+                **cfg.common,
+                **cfg.write_unit,
             })
 
         self.initial_memory = nn.Parameter(torch.FloatTensor(1, module_dim))
-        if cfg.model.init_mem == 'random':
+        if cfg.init_mem == 'random':
             self.initial_memory.data.normal_()
         else:
             self.initial_memory.data.zero_()
@@ -344,10 +344,11 @@ class MACUnit(nn.Module):
         initial_memory = self.initial_memory.expand(batch_size, self.module_dim)
         initial_control = question
 
-        if self.cfg.TRAIN.VAR_DROPOUT:
-            memDpMask = generateVarDpMask((batch_size, self.module_dim), 0.85)
-        else:
-            memDpMask = None
+        # if self.cfg.TRAIN.VAR_DROPOUT:
+        #     memDpMask = generateVarDpMask((batch_size, self.module_dim), 0.85)
+        # else:
+        #     memDpMask = None
+        memDpMask = None
 
         return initial_control, initial_memory, memDpMask
 
@@ -505,36 +506,36 @@ class MACNetwork(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-        if getattr(cfg.model, 'separate_syntax_semantics') is True:
-            cfg.model.input_unit.separate_syntax_semantics = True
-            cfg.model.control_unit.separate_syntax_semantics = True
-        cfg.model.input_unit.use_feats = cfg.model.use_feats
-        cfg.model.read_unit.use_feats = cfg.model.use_feats
-        cfg.model.read_unit.num_gt_lobs = cfg.model.num_gt_lobs
+        if getattr(cfg, 'separate_syntax_semantics') is True:
+            cfg.input_unit.separate_syntax_semantics = True
+            cfg.control_unit.separate_syntax_semantics = True
+        cfg.input_unit.use_feats = cfg.use_feats
+        cfg.read_unit.use_feats = cfg.use_feats
+        cfg.read_unit.num_gt_lobs = cfg.num_gt_lobs
 
         encoder_vocab_size = len(vocab['question_token_to_idx'])
         
         self.input_unit = InputUnit(
             vocab_size=encoder_vocab_size,
-            num_gt_lobs=cfg.model.num_gt_lobs,
-            **cfg.model.common,
-            **cfg.model.input_unit,
+            num_gt_lobs=cfg.num_gt_lobs,
+            **cfg.common,
+            **cfg.input_unit,
         )
 
         self.output_unit = OutputUnit(
             num_answers=num_answers,
-            **cfg.model.common,
-            **cfg.model.output_unit,
+            **cfg.common,
+            **cfg.output_unit,
         )
 
         self.mac = MACUnit(
-            cfg.model,
-            # num_gt_lobs=cfg.model.num_gt_lobs,
-            max_step=cfg.model.max_step,
-            **cfg.model.common,
+            cfg,
+            # num_gt_lobs=cfg.num_gt_lobs,
+            max_step=cfg.max_step,
+            **cfg.common,
         )
 
-        init_modules(self.modules(), w_init=cfg.TRAIN.WEIGHT_INIT)
+        init_modules(self.modules(), w_init=cfg.weight_init)
         nn.init.uniform_(self.input_unit.encoder_embed.weight, -1.0, 1.0)
         nn.init.normal_(self.mac.initial_memory)
 
