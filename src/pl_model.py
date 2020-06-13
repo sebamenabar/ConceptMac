@@ -56,7 +56,7 @@ class PLModel(BasePLModel):
 
         self.init_mac()
 
-        self.loss_fn = nn.CrossEntropyLoss()
+        self.loss_fn = nn.CrossEntropyLoss(reduction="none")
 
     def __add_param_group(self, group_name, params, module_name):
         default = self.cfg.train.optimizers.default
@@ -108,20 +108,20 @@ class PLModel(BasePLModel):
 
     def prepare_data(self):
         self.orig_train_dataset = ClevrDatasetImages(
-            base_dir=self.cfg.orig_dir, split="val", augment=self.cfg.train.augment,
+            base_dir=self.cfg.orig_dir, split="train", augment=self.cfg.train.augment,
         )
 
         self.orig_val_dataset = ClevrDatasetImages(
             base_dir=self.cfg.orig_dir, split="val", augment=False,
         )
 
-        # self.uni_train_dataset = ClevrDatasetImages(
-        #     base_dir=self.cfg.uni_dir, split="train", augment=self.cfg.train.augment,
-        # )
+        self.uni_train_dataset = ClevrDatasetImages(
+            base_dir=self.cfg.uni_dir, split="train", augment=self.cfg.train.augment,
+        )
 
-        # self.uni_val_dataset = ClevrDatasetImages(
-        #     base_dir=self.cfg.uni_dir, split="val", augment=False,
-        # )
+        self.uni_val_dataset = ClevrDatasetImages(
+            base_dir=self.cfg.uni_dir, split="val", augment=False,
+        )
 
     def train_dataloader(self):
         if self.cfg.train.dataset == "orig":
@@ -150,18 +150,18 @@ class PLModel(BasePLModel):
             collate_fn=collate_fn,
         )
 
-        # uni_val_loader = DataLoader(
-        #     self.uni_val_dataset,
-        #     shuffle=False,
-        #     drop_last=False,
-        #     batch_size=self.cfg.train.val_bsz,
-        #     num_workers=self.cfg.num_workers,
-        #     pin_memory=self.use_cuda,
-        #     collate_fn=collate_fn,
-        # )
+        uni_val_loader = DataLoader(
+            self.uni_val_dataset,
+            shuffle=False,
+            drop_last=False,
+            batch_size=self.cfg.train.val_bsz,
+            num_workers=self.cfg.num_workers,
+            pin_memory=self.use_cuda,
+            collate_fn=collate_fn,
+        )
 
-        return orig_val_loader
-        # return [orig_val_loader, uni_val_loader]
+        # return orig_val_loader
+        return [orig_val_loader, uni_val_loader]
 
     def forward(self, img, question, question_len):
         return self.mac(self.encoder(img), question, question_len)
@@ -184,7 +184,7 @@ class PLModel(BasePLModel):
         )
         answer = answer.long()
         pred = self(image, question, question_len)
-        loss = self.loss_fn(pred, answer)
+        loss = self.loss_fn(pred, answer).mean()
 
         acc = (pred.argmax(1) == answer).float().mean()
 
@@ -193,11 +193,15 @@ class PLModel(BasePLModel):
         #         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.TRAIN.CLIP)
 
         tqdm_dict = {"acc": acc}
+        if batch_nb == 0:
+            self.plot_vqa_attn(
+                batch, "train_step_attn", num_samples=self.cfg.train.num_plot_samples,
+            )
 
         return {
             "loss": loss,
             "progress_bar": tqdm_dict,
-            "log": tqdm_dict,
+            "log": {"loss": loss, **tqdm_dict},
         }
 
     def validation_step(self, batch, batch_nb, dataset_idx=None):
@@ -227,13 +231,29 @@ class PLModel(BasePLModel):
                 batch, fig_name, num_samples=self.cfg.train.num_plot_samples,
             )
 
-        tqdm_dict = {"acc": acc}
-
         return {
             "loss": loss,
-            "progress_bar": tqdm_dict,
-            "log": tqdm_dict,
+            "acc": acc,
         }
+
+    def validation_epoch_end(self, outputs):
+        def mean_agg(olist):
+            return torch.cat(olist).float().mean()
+
+        mean_orig_loss = mean_agg([o["loss"] for o in outputs[0]])
+        mean_orig_acc = mean_agg([o["acc"] for o in outputs[0]])
+        mean_uni_loss = mean_agg([o["loss"] for o in outputs[1]])
+        mean_uni_acc = mean_agg([o["acc"] for o in outputs[1]])
+
+        log = {
+            "val_orig_loss": mean_orig_loss,
+            "val_orig_acc": mean_orig_acc,
+            "val_uni_loss": mean_uni_loss,
+            "val_uni_acc": mean_uni_acc,
+            "current_epoch": self.current_epoch,
+        }
+
+        return {"log": log}
 
     def plot_vqa_attn(self, batch, fig_name, num_samples=32, close=True):
         return_layers = {
@@ -278,12 +298,11 @@ class PLModel(BasePLModel):
             )
 
             cw_ax = fig11.get_axes()[i * 7]
-            cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=22)
+            cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=16)
             img_ax = fig11.get_axes()[i * 7 + 2]
             # print(ds.questions[q_index])
-            img_ax.set_title(batch["image_fnames"][i], fontsize=22)
+            img_ax.set_title(batch["image_fnames"][i], fontsize=10)
 
         self.log_figure(fig11, fig_name, close=close)
 
         return fig11
-

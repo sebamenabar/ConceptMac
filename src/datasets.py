@@ -56,16 +56,18 @@ class ClevrDatasetImages(data.Dataset):
         self.to_tensor = transforms.ToTensor()
         self.vocab = load_vocab(base_dir)
 
-    def load_image(self, img_fname):
-        return Image.open(
-            osp.join(self.base_dir, "images", self.split, img_fname)
-        ).convert("RGB")
+    def get_img_fp(self, img_fname):
+        return osp.join(self.base_dir, "images", self.split, img_fname)
+
+    def load_image(self, img_fp):
+        return Image.open(img_fp).convert("RGB")
 
     def get_for_viz(self, index, augment=False):
         img_fname, question, answer, family = self.data[index]
         question_words = idxs_to_question(question, self.vocab["question_idx_to_token"])
         answer_word = self.vocab["answer_idx_to_token"][answer]
-        img = self.load_image(img_fname)
+        img_fp = self.get_img_fp(img_fname)
+        img = self.load_image(img_fp)
         timg = img
         if augment:
             timg = self.aug_transform(img)
@@ -82,14 +84,15 @@ class ClevrDatasetImages(data.Dataset):
             answer_word=answer_word,
             raw_image=img,
             question_idx=index,
-            image_fname=img_fname,
+            image_fname=img_fp,
         )
 
     def __getitem__(self, index):
         img_fname, question, answer, family = self.data[index]
         question_words = idxs_to_question(question, self.vocab["question_idx_to_token"])
         answer_word = self.vocab["answer_idx_to_token"][answer]
-        img = self.load_image(img_fname)
+        img_fp = self.get_img_fp(img_fname)
+        img = self.load_image(img_fp)
         timg = img
         if self.augment:
             timg = self.aug_transform(img)
@@ -106,7 +109,7 @@ class ClevrDatasetImages(data.Dataset):
             answer_word=answer_word,
             raw_image=img,
             question_idx=index,
-            image_fname=img_fname,
+            image_fname=img_fp,
         )
 
     def __len__(self):

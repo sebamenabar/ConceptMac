@@ -25,9 +25,9 @@ if __name__ == "__main__":
     loggers = model.make_lightning_loggers()
     default_ckpt_callback_kwargs = {
         "filepath": osp.join(model.exp_dir, "checkpoints/"),
-        # "monitor": "val_depths_acc_0.025",
+        "monitor": "val_uni_acc",
         "verbose": True,
-        "save_top_k": 0,
+        "save_top_k": 2,
     }
     ckpt_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
         **default_ckpt_callback_kwargs,
