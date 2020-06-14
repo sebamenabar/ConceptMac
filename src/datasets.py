@@ -74,10 +74,10 @@ class ClevrDatasetImages(data.Dataset):
         img = self.load_image(img_fp)
         timg = img
         if augment:
-            timg = self.aug_transform(img)
+            img = self.aug_transform(img)
         else:
-            timg = self.resize(img)
-        timg = self.to_tensor(timg)
+            img = self.resize(img)
+        timg = self.to_tensor(img)
 
         return dict(
             image=timg,
@@ -99,10 +99,10 @@ class ClevrDatasetImages(data.Dataset):
         img = self.load_image(img_fp)
         timg = img
         if self.augment:
-            timg = self.aug_transform(img)
+            img = self.aug_transform(img)
         else:
-            timg = self.resize(img)
-        timg = self.to_tensor(timg)
+            img = self.resize(img)
+        timg = self.to_tensor(img)
 
         return dict(
             image=timg,
