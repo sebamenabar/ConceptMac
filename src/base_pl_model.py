@@ -48,6 +48,7 @@ class BasePLModel(pl.LightningModule):
         self._run_name = None
         self.work_dir = osp.dirname(osp.dirname(osp.realpath(__file__)))
         self.exp_dir = ""
+        self.exp_name = ""
 
     @property
     def use_cuda(self):
@@ -137,7 +138,7 @@ class BasePLModel(pl.LightningModule):
             api_key=os.environ["COMET_API_KEY"],
             workspace=self.cfg.comet_workspace,
             project_name=self.cfg.comet_project_name,
-            experiment_name=self.run_name,
+            experiment_name=f"{self.exp_name}-{self.run_name}",
         )
 
     # def make_lightning_loggers_ckpt(
@@ -167,7 +168,8 @@ class BasePLModel(pl.LightningModule):
     def init_log(self, args=None):
         now = dt.now(tz.tzlocal())
         now = now.strftime("%m-%d-%Y-%H-%M-%S")
-        log_dir = self.cfg.exp_name
+        self.exp_name = self.cfg.exp_name
+        log_dir = self.exp_name
         run_name = self.cfg.run_name
         if run_name == "" or run_name is None:
             run_name = now

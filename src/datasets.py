@@ -37,7 +37,11 @@ class ClevrDatasetImages(data.Dataset):
         self.split = split
         self.augment = augment
 
-        info_fpath = os.path.join(base_dir, "data", "{}.pkl".format(split))
+        if osp.isfile(osp.join(base_dir, "data")):
+            info_fpath = osp.join(base_dir, "data", "{}.pkl".format(split))
+        else:
+            info_fpath = osp.join(base_dir, "features", "{}.pkl".format(split))
+
         with open(info_fpath, "rb") as f:
             self.data = pickle.load(f)
 

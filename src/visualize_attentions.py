@@ -167,7 +167,7 @@ def setlabel(ax, label, loc=2, borderpad=0.6, **kwargs):
         borderaxespad=0,
         borderpad=borderpad,
         frameon=False,
-        prop={"size": 22, "weight": "bold",},
+        prop={"size": 11, "weight": "bold",},
         **kwargs,
     )
     for text in label_legend.get_texts():
@@ -206,7 +206,7 @@ def plot_table_attn(
     )
     bx.set_ylim(bx.get_ylim()[0] + 0.5, bx.get_ylim()[1] - 0.5)
     bx.xaxis.set_ticks_position(tick_position)
-    bx.set_yticklabels(bx.get_yticklabels(), rotation=0, fontsize=24)
+    bx.set_yticklabels(bx.get_yticklabels(), rotation=0, fontsize=11)
 
     return bx
 

@@ -51,7 +51,7 @@ __C.checkpoint_path = (None, edict(help="checkpoint path", type=str))
 
 __C.train = edict()
 __C.train.bsz = (64, edict(help="train batch size", type=int))
-__C.train.epochs = (10, edict(help="train max number of epochs", type=int))
+__C.train.epochs = (30, edict(help="train max number of epochs", type=int))
 __C.train.lr = (1e-4, edict(help="optimizer lr", type=float))
 
 __C.train.val_bsz = (64, edict(help="val batch size", type=int))

@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 from pprint import PrettyPrinter as PP
 
@@ -17,11 +18,14 @@ if __name__ == "__main__":
     args, cfg = parse_args_and_set_config(__C, blacklist=["gradient_clip_val"])
     pp = PP(indent=4)
 
+    print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
+    print(torch.cuda.get_device_name())
     model = PLModel(cfg)
     # Prints should be done after the init log
     model.init_log(vars(args))
     pp.pprint(vars(args))
     pp.pprint(cfg)
+    
     loggers = model.make_lightning_loggers()
     default_ckpt_callback_kwargs = {
         "filepath": osp.join(model.exp_dir, "checkpoints/"),

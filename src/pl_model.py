@@ -31,8 +31,10 @@ pp = PP(indent=4)
 class Normalize(nn.Module):
     def __init__(self, mean, std):
         super().__init__()
-        self.mean = torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1)
-        self.std = torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1)
+        mean = torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1)
+        std = torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1)
+        self.register_buffer("mean", mean)
+        self.register_buffer("std", std)
 
     def forward(self, x):
         return (x - self.mean) / self.std
@@ -269,7 +271,9 @@ class PLModel(BasePLModel):
             batch["answer"],
         )
         answer = answer.long()
-        mid_outputs, output = mid_getter(image, question, question_len)
+        mid_outputs, output = mid_getter(
+            image[:num_samples], question[:num_samples], question_len[:num_samples]
+        )
 
         bsz = question.size(0)
         num_samples = min(num_samples, bsz)
@@ -281,10 +285,13 @@ class PLModel(BasePLModel):
 
         num_lobs = 0
         num_steps = words_attn.shape[1]
-        fig11 = plt.figure(figsize=(16, bsz * (2 * (num_steps + num_steps // 2) + 4)))
-        outer_grid = fig11.add_gridspec(bsz, 1, wspace=0.0, hspace=0.05)
+        # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
+        fig11 = plt.figure(
+            figsize=(8, (num_samples * (2 * (num_steps + num_steps // 2) + 4)) // 2)
+        )
+        outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
 
-        for i in range(bsz):
+        for i in range(num_samples):
             plot_vqa_attn(
                 img=batch["raw_images"][i],
                 num_steps=num_steps,
@@ -298,11 +305,11 @@ class PLModel(BasePLModel):
             )
 
             cw_ax = fig11.get_axes()[i * 7]
-            cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=16)
+            cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=10)
             img_ax = fig11.get_axes()[i * 7 + 2]
             # print(ds.questions[q_index])
-            img_ax.set_title(batch["image_fnames"][i], fontsize=10)
-
+            img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
+        # plt.tight_layout()
         self.log_figure(fig11, fig_name, close=close)
 
         return fig11
