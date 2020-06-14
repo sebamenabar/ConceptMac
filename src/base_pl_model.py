@@ -173,13 +173,14 @@ class BasePLModel(pl.LightningModule):
         run_name = self.cfg.run_name
         if run_name == "" or run_name is None:
             run_name = now
-        self._run_name = run_name
         exp_dir = osp.join(self.work_dir, "experiments", log_dir, run_name)
         _exp_dir = exp_dir
         i = 2
         while os.path.exists(_exp_dir):
             _exp_dir = f"{exp_dir}-{i}"
+            _run_name = f"{run_name}-{i}"
             i += 1
+        self._run_name = _run_name
         exp_dir = _exp_dir
 
         self.exp_dir = exp_dir
