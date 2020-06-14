@@ -18,8 +18,9 @@ if __name__ == "__main__":
     args, cfg = parse_args_and_set_config(__C, blacklist=["gradient_clip_val"])
     pp = PP(indent=4)
 
-    print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
-    print(torch.cuda.get_device_name())
+    if torch.cuda.is_available():
+        print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
+        print(torch.cuda.get_device_name())
     model = PLModel(cfg)
     # Prints should be done after the init log
     model.init_log(vars(args))
