@@ -46,7 +46,7 @@ __C.model.encoder.train = False
 __C.model.mac = edict(
     weight_init="xavier_uniform",
     init_mem="random",
-    max_step=4,
+    max_step=(4, edict(type=int)),
     separate_syntax_semantics=False,
     use_feats="spatial",
     num_gt_lobs=0,
@@ -64,7 +64,12 @@ __C.model.mac = edict(
     ),
     control_unit=edict(control_feed_prev=True, control_cont_activation="TANH",),
     read_unit=edict(gate=False, num_lobs=0,),
-    write_unit=edict(rtom=False, self_attn=False, gate=False, gate_shared=False,),
+    write_unit=edict(
+        rtom=False,
+        self_attn=(False, edict(type=parse_bool)),
+        gate=(False, edict(type=parse_bool)),
+        gate_shared=(False, edict(type=parse_bool)),
+    ),
     output_unit=edict(),
 )
 

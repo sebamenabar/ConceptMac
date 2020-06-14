@@ -255,6 +255,8 @@ class PLModel(BasePLModel):
             "current_epoch": self.current_epoch,
         }
 
+        self.print(pp.pformat(log))
+
         return {"log": log}
 
     def plot_vqa_attn(self, batch, fig_name, num_samples=32, close=True):
@@ -304,9 +306,9 @@ class PLModel(BasePLModel):
                 gridspec=outer_grid[i],
             )
 
-            cw_ax = fig11.get_axes()[i * 7]
+            cw_ax = fig11.get_axes()[i * (3 + num_steps)]
             cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=10)
-            img_ax = fig11.get_axes()[i * 7 + 2]
+            img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
             # print(ds.questions[q_index])
             img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
         # plt.tight_layout()
