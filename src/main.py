@@ -21,6 +21,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
         print(torch.cuda.get_device_name())
+    cfg.train.accumulate_grad_batches = args.accumulate_grad_batches
     model = PLModel(cfg)
     # Prints should be done after the init log
     model.init_log(vars(args))

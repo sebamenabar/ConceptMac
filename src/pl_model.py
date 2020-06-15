@@ -142,9 +142,9 @@ class PLModel(BasePLModel):
             base_dir=self.cfg.orig_dir, split="val", augment=False,
         )
 
-        self.uni_train_dataset = ClevrDatasetImages(
-            base_dir=self.cfg.uni_dir, split="train", augment=self.cfg.train.augment,
-        )
+        # self.uni_train_dataset = ClevrDatasetImages(
+        #     base_dir=self.cfg.uni_dir, split="train", augment=self.cfg.train.augment,
+        # )
 
         self.uni_val_dataset = ClevrDatasetImages(
             base_dir=self.cfg.uni_dir, split="val", augment=False,
@@ -160,7 +160,7 @@ class PLModel(BasePLModel):
             dataset,
             shuffle=True,
             drop_last=True,
-            batch_size=self.cfg.train.bsz,
+            batch_size=self.cfg.train.bsz // self.cfg.train.accumulate_grad_batches,
             num_workers=self.cfg.num_workers,
             pin_memory=self.use_cuda,
             collate_fn=collate_fn,
@@ -259,11 +259,13 @@ class PLModel(BasePLModel):
             )
 
         return {
-            "loss": loss,
-            "acc": acc,
+            "loss": loss.cpu(),
+            "acc": acc.float().cpu(),
         }
 
     def validation_epoch_end(self, outputs):
+        torch.cuda.empty_cache()
+
         def mean_agg(olist):
             return torch.cat(olist).float().mean()
 
@@ -280,63 +282,82 @@ class PLModel(BasePLModel):
             "current_epoch": self.current_epoch,
         }
 
+        self.print()
         self.print(pp.pformat(log))
 
         return {"log": log}
 
     def plot_vqa_attn(self, batch, fig_name, num_samples=32, close=True):
-        return_layers = {
-            "mac.mac.control.cw_attn_idty": "cw_attn",
-            "mac.mac.read.kb_attn_idty": "kb_attn",
-        }
-        mid_getter = MidGetter(self, return_layers, keep_output=True)
+        with torch.no_grad():
+            return_layers = {
+                "mac.mac.control.cw_attn_idty": "cw_attn",
+                "mac.mac.read.kb_attn_idty": "kb_attn",
+            }
+            mid_getter = MidGetter(self, return_layers, keep_output=True)
 
-        image, question, question_len, answer = (
-            batch["image"],
-            batch["question"],
-            batch["question_length"],
-            batch["answer"],
-        )
-        answer = answer.long()
-        mid_outputs, output = mid_getter(
-            image[:num_samples], question[:num_samples], question_len[:num_samples]
-        )
+            image, question, question_len, answer = (
+                batch["image"],
+                batch["question"],
+                batch["question_length"],
+                batch["answer"],
+            )
+            answer = answer.long()
+            mid_outputs, output = mid_getter(
+                image[:num_samples], question[:num_samples], question_len[:num_samples]
+            )
+            output = output.detach().cpu()
 
-        bsz = question.size(0)
-        num_samples = min(num_samples, bsz)
+            for k, v in mid_outputs.items():
+                if isinstance(v, torch.Tensor):
+                    mid_outputs[k] = v.detach().cpu()
+                elif isinstance(v, list):
+                    mid_outputs[k] = [_v.detach().cpu() for _v in v]
 
-        kb_attn = torch.stack(mid_outputs["kb_attn"], 1).detach().cpu().numpy()
-        words_attn = (
-            torch.stack(mid_outputs["cw_attn"], 1).squeeze(-1).detach().cpu().numpy()
-        )
+            bsz = question.size(0)
+            num_samples = min(num_samples, bsz)
 
-        num_lobs = 0
-        num_steps = words_attn.shape[1]
-        # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
-        fig11 = plt.figure(
-            figsize=(8, (num_samples * (2 * (num_steps + num_steps // 2) + 4)) // 2)
-        )
-        outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
+            torch.cuda.empty_cache()
 
-        for i in range(num_samples):
-            plot_vqa_attn(
-                img=batch["raw_images"][i],
-                num_steps=num_steps,
-                words=batch["question_words"][i],
-                words_attn=words_attn[i, :, : batch["question_length"][i]],
-                img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_lobs],
-                prediction=self.vocab["answer_idx_to_token"][output[i].argmax().item()],
-                real_answer=batch["answer_words"][i],
-                fig=fig11,
-                gridspec=outer_grid[i],
+            kb_attn = torch.stack(mid_outputs["kb_attn"], 1).detach().cpu().numpy()
+            words_attn = (
+                torch.stack(mid_outputs["cw_attn"], 1)
+                .squeeze(-1)
+                .detach()
+                .cpu()
+                .numpy()
             )
 
-            cw_ax = fig11.get_axes()[i * (3 + num_steps)]
-            cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=10)
-            img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
-            # print(ds.questions[q_index])
-            img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
-        # plt.tight_layout()
-        self.log_figure(fig11, fig_name, close=close)
+            num_lobs = 0
+            num_steps = words_attn.shape[1]
+            # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
+            fig11 = plt.figure(
+                figsize=(8, (num_samples * (2 * (num_steps + num_steps // 2) + 4)) // 2)
+            )
+            outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
+
+            for i in range(num_samples):
+                plot_vqa_attn(
+                    img=batch["raw_images"][i],
+                    num_steps=num_steps,
+                    words=batch["question_words"][i],
+                    words_attn=words_attn[i, :, : batch["question_length"][i]],
+                    img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_lobs],
+                    prediction=self.vocab["answer_idx_to_token"][
+                        output[i].argmax().item()
+                    ],
+                    real_answer=batch["answer_words"][i],
+                    fig=fig11,
+                    gridspec=outer_grid[i],
+                )
+
+                cw_ax = fig11.get_axes()[i * (3 + num_steps)]
+                cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=10)
+                img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
+                # print(ds.questions[q_index])
+                img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
+            # plt.tight_layout()
+            self.log_figure(fig11, fig_name, close=close)
+
+        torch.cuda.empty_cache()
 
         return fig11

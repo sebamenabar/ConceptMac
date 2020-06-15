@@ -17,9 +17,9 @@ _plt = None
 
 
 class Logger(object):
-    def __init__(self, logfile):
+    def __init__(self, log):
         self.terminal = sys.stdout
-        self.log = open(logfile, "a")
+        self.log = log
 
     def write(self, message):
         self.terminal.write(message)
@@ -31,6 +31,23 @@ class Logger(object):
         # this flush method is needed for python 3 compatibility.
         # this handles the flush command by doing nothing.
         # you might want to specify some extra behavior here.
+        pass
+
+
+# I'm not sure if this is needed, but is the first
+# patch that came to my mind
+class ErrLogger(object):
+    def __init__(self, log):
+        self.terminal = sys.stderr
+        self.log = log
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        sys.stderr.flush()
+        self.log.flush()
+
+    def flush(self):
         pass
 
 
@@ -171,17 +188,18 @@ class BasePLModel(pl.LightningModule):
         self.exp_name = self.cfg.exp_name
         log_dir = self.exp_name
         _run_name = self.cfg.run_name
+        run_name = _run_name
         if _run_name == "" or _run_name is None:
             _run_name = now
-        exp_dir = osp.join(self.work_dir, "experiments", log_dir, _run_name)
-        _exp_dir = exp_dir
-        i = 2
-        while os.path.exists(_exp_dir):
-            _exp_dir = f"{exp_dir}-{i}"
-            _run_name = f"{run_name}-{i}"
-            i += 1
-        self._run_name = _run_name
+        _exp_dir = osp.join(self.work_dir, "experiments", log_dir, _run_name)
         exp_dir = _exp_dir
+        i = 2
+        while os.path.exists(exp_dir):
+            exp_dir = f"{_exp_dir}-{i}"
+            run_name = f"{_run_name}-{i}"
+            i += 1
+        self._run_name = run_name
+        # exp_dir = exp_dir
 
         self.exp_dir = exp_dir
         shutil.copytree(
@@ -191,7 +209,9 @@ class BasePLModel(pl.LightningModule):
         )
 
         self.logfile = osp.join(exp_dir, "logfile.log")
-        sys.stdout = Logger(self.logfile)
+        log = open(self.logfile, "a")
+        sys.stdout = Logger(log)
+        sys.stderr = ErrLogger(log)
 
         with open(osp.join(self.exp_dir, "cfg.json"), "w") as f:
             json.dump(self.cfg, f, indent=4)

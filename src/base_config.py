@@ -55,6 +55,7 @@ __C.train.epochs = (30, edict(help="train max number of epochs", type=int))
 __C.train.lr = (1e-4, edict(help="optimizer lr", type=float))
 
 __C.train.val_bsz = (64, edict(help="val batch size", type=int))
+__C.train.accumulate_grad_batches = (1, edict(type=int))
 
 def _to_values_only(values, idx):
     ### Transforms __C with tuples as values to the same format
