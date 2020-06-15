@@ -47,6 +47,9 @@ class ErrLogger(object):
         sys.stderr.flush()
         self.log.flush()
 
+    def close(self):
+        pass
+
     def flush(self):
         pass
 

@@ -25,38 +25,45 @@ if __name__ == "__main__":
 
     # Prints should be done after the init log
     model.init_log(vars(args))
-    with open(osp.join(model.exp_dir, "logfile.log"), "a") as log:
-        sys.stdout = Logger(log)
-        sys.stderr = ErrLogger(log)
+    try:
+        _stdout = sys.stdout
+        _stderr = sys.stderr
+        with open(osp.join(model.exp_dir, "logfile.log"), "a") as log:
+            sys.stdout = Logger(log)
+            sys.stderr = ErrLogger(log)
+            pl._logger.addHandler(pl.python_logging.StreamHandler(sys.stdout))
 
-        if torch.cuda.is_available():
-            print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
-            print(torch.cuda.get_device_name())
-        pp.pprint(vars(args))
-        pp.pprint(cfg)
-        
-        loggers = model.make_lightning_loggers()
-        default_ckpt_callback_kwargs = {
-            "filepath": osp.join(model.exp_dir, "checkpoints/"),
-            "monitor": "val_uni_acc",
-            "verbose": True,
-            "save_top_k": 2,
-        }
-        ckpt_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
-            **default_ckpt_callback_kwargs,
-        )
-        trainer = pl.Trainer.from_argparse_args(
-            args,
-            logger=loggers,
-            checkpoint_callback=ckpt_callback,
-            max_epochs=cfg.train.epochs,
-            default_root_dir=model.exp_dir,
-            gradient_clip_val=cfg.train.gradient_clip_val,
-        )
-        if args.eval:
-            pass
-        elif args.test:
-            pass
-        else:
-            pass
-            trainer.fit(model)
+            if torch.cuda.is_available():
+                print("GPUS:", os.environ["CUDA_VISIBLE_DEVICES"])
+                print(torch.cuda.get_device_name())
+            print(pp.pformat(vars(args)))
+            print(pp.pformat(cfg))
+
+            loggers = model.make_lightning_loggers()
+            default_ckpt_callback_kwargs = {
+                "filepath": osp.join(model.exp_dir, "checkpoints/"),
+                "monitor": "val_uni_acc",
+                "verbose": True,
+                "save_top_k": 2,
+            }
+            ckpt_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
+                **default_ckpt_callback_kwargs,
+            )
+            trainer = pl.Trainer.from_argparse_args(
+                args,
+                logger=loggers,
+                checkpoint_callback=ckpt_callback,
+                max_epochs=cfg.train.epochs,
+                default_root_dir=model.exp_dir,
+                gradient_clip_val=cfg.train.gradient_clip_val,
+            )
+            if args.eval:
+                pass
+            elif args.test:
+                pass
+            else:
+                pass
+                trainer.fit(model)
+    finally:
+        sys.stdout = _stdout
+        sys.stderr = _stderr
