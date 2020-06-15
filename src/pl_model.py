@@ -53,6 +53,8 @@ class PLModel(BasePLModel):
             self.init_resnet_encoder()
         elif cfg.model.encoder.type == "scratch":
             self.init_scratch_encoder()
+        elif cfg.model.encoder.type == "pretrained":
+            self.init_pretrained_encoder()
         else:
             raise ValueError(f"Unkwown encoder {cfg.model.encoder.type}")
 
@@ -92,6 +94,29 @@ class PLModel(BasePLModel):
         self.__add_param_group(
             "group1", self.encoder.parameters(), "encoder",
         )
+
+    def init_pretrained_encoder(self):
+        encoder = Encoder(out_nc=512)
+        ckpt = torch.load(self.cfg.model.encoder.ckpt_fp, map_location="cpu")
+        encoder_state_dict = odict(
+            {
+                k.replace("encoder.", ""): v
+                for k, v in ckpt["state_dict"].items()
+                if k.startswith("encoder.")
+            }
+        )
+        encoder.load_state_dict(encoder_state_dict, strict=True)
+        self.encoder = encoder
+        if self.cfg.model.encoder.train:
+            self.__add_param_group(
+                "group1", self.encoder.parameters(), "encoder",
+            )
+        else:
+            for p in self.encoder.parameters():
+                p.requires_grad = False
+            self.encoder.eval()
+
+        self.cfg.model.mac.input_unit.in_channels = 512
 
     def init_mac(self):
         self.vocab = load_vocab(self.cfg.orig_dir)
