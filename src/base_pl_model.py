@@ -208,10 +208,10 @@ class BasePLModel(pl.LightningModule):
             ignore=shutil.ignore_patterns(".*", "__pycache__", ".DS_Store"),
         )
 
-        self.logfile = osp.join(exp_dir, "logfile.log")
-        log = open(self.logfile, "a")
-        sys.stdout = Logger(log)
-        sys.stderr = ErrLogger(log)
+        # self.logfile = osp.join(exp_dir, "logfile.log")
+        # log = open(self.logfile, "a")
+        # sys.stdout = Logger(log)
+        # sys.stderr = ErrLogger(log)
 
         with open(osp.join(self.exp_dir, "cfg.json"), "w") as f:
             json.dump(self.cfg, f, indent=4)
