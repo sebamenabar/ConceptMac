@@ -35,7 +35,6 @@ class ClevrDatasetImages(data.Dataset):
         super().__init__()
         self.base_dir = base_dir
         self.split = split
-        self.augment = augment
 
         if osp.isfile(osp.join(base_dir, "data")):
             info_fpath = osp.join(base_dir, "data", "{}.pkl".format(split))
@@ -45,17 +44,33 @@ class ClevrDatasetImages(data.Dataset):
         with open(info_fpath, "rb") as f:
             self.data = pickle.load(f)
 
-        self.aug_transform = transforms.Compose(
-            [
-                transforms.RandomPerspective(p=0.5),
-                transforms.RandomResizedCrop(
-                    (224, 224), scale=(0.3, 1), ratio=(0.4, 2)
-                ),
-                # transforms.RandomCrop((256, 256)),
-                # transforms.Resize((224, 224)),
-                # transforms.ToTensor(),
-            ]
-        )
+        # self.aug_transform = transforms.Compose(
+        #     [
+        #         transforms.RandomPerspective(p=1.0, distortion_scale=0.5),
+        #         # transforms.RandomResizedCrop(
+        #         #     (224, 224), scale=(0.3, 1), ratio=(0.4, 2)
+        #         # ),
+        #         # transforms.RandomCrop((256, 256)),
+        #         # transforms.Resize((224, 224)),
+        #         # transforms.ToTensor(),
+        #     ]
+        # )
+        # self.persp = transforms.RandomPerspective(p=1.0, distortion_scale=0.4)
+        # self.rrc = transforms.RandomResizedCrop(
+        #     (224, 224), scale=(0.4, 1), ratio=(0.3, 2)
+        # )
+
+        # self.rrc = transforms.RandomCrop((256, 256))
+        if augment:
+            self.augment = transforms.Compose(
+                [
+                    transforms.RandomPerspective(p=1.0, distortion_scale=0.7,),
+                    transforms.RandomCrop((224, 256)),
+                    transforms.Resize((224, 224)),
+                ]
+            )
+        else:
+            self.augment = None
         self.resize = transforms.Resize((224, 224))
         self.to_tensor = transforms.ToTensor()
         self.vocab = load_vocab(base_dir)
@@ -66,17 +81,18 @@ class ClevrDatasetImages(data.Dataset):
     def load_image(self, img_fp):
         return Image.open(img_fp).convert("RGB")
 
-    def get_for_viz(self, index, augment=False):
+    def get_for_viz(self, index, persp=False, rrc=False):
         img_fname, question, answer, family = self.data[index]
         question_words = idxs_to_question(question, self.vocab["question_idx_to_token"])
         answer_word = self.vocab["answer_idx_to_token"][answer]
         img_fp = self.get_img_fp(img_fname)
         img = self.load_image(img_fp)
-        timg = img
-        if augment:
-            img = self.aug_transform(img)
-        else:
-            img = self.resize(img)
+
+        if persp:
+            img = self.persp(img)
+        if rrc:
+            img = self.rrc(img)
+        # img = self.resize(img)
         timg = self.to_tensor(img)
 
         return dict(
@@ -99,7 +115,7 @@ class ClevrDatasetImages(data.Dataset):
         img = self.load_image(img_fp)
         timg = img
         if self.augment:
-            img = self.aug_transform(img)
+            img = self.augment(img)
         else:
             img = self.resize(img)
         timg = self.to_tensor(img)
@@ -162,9 +178,16 @@ class ClevrDataset(data.Dataset):
 
 
 def collate_fn(batch):
-    images, lengths, answers, question_words, answer_words, raw_images, question_idxs, image_fnames = [
-        [] for _ in range(8)
-    ]
+    (
+        images,
+        lengths,
+        answers,
+        question_words,
+        answer_words,
+        raw_images,
+        question_idxs,
+        image_fnames,
+    ) = [[] for _ in range(8)]
     batch_size = len(batch)
 
     max_len = max(map(lambda x: x["question_len"], batch))
@@ -186,13 +209,11 @@ def collate_fn(batch):
         question_idxs.append(b["question_idx"])
         image_fnames.append(b["image_fname"])
 
-
     return {
         "image": torch.stack(images),
         "question": torch.from_numpy(questions),
         "answer": torch.LongTensor(answers),
         "question_length": lengths,
-
         "question_words": question_words,
         "answer_words": answer_words,
         "raw_images": raw_images,
