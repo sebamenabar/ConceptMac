@@ -144,7 +144,7 @@ def parse_args_and_set_config(__c=__C, blacklist=None):
             if allowed_type is bool:
 
                 def allowed_type(x):
-                    return bool(parsing.strtobool(x))
+                    return bool(parsing.str_to_bool(x))
 
             parser.add_argument(
                 f"--{arg}",

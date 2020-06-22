@@ -22,7 +22,7 @@ from mac import MACNetwork
 from encoder import Encoder
 from base_pl_model import BasePLModel
 from utils import load_vocab
-from datasets import ClevrDatasetImages, collate_fn
+from datasets import ClevrDatasetImages, collate_fn, GQADataset, collate_fn_gqa
 from visualize_attentions import plot_vqa_attn
 
 pp = PP(indent=4)
@@ -50,17 +50,28 @@ class PLModel(BasePLModel):
         self.optimizer_groups = odict(group1=[])
 
         if cfg.model.encoder.type == "resnet50":
-            self.init_resnet_encoder()
+            self.init_resnet_encoder(v="resnet50")
+        elif cfg.model.encoder.type == "resnet101":
+            self.init_resnet_encoder(v="resnet101")
         elif cfg.model.encoder.type == "scratch":
             self.init_scratch_encoder()
         elif cfg.model.encoder.type == "pretrained":
             self.init_pretrained_encoder()
+        elif cfg.model.encoder.type == "none":
+            self.encoder = nn.Identity()
         else:
             raise ValueError(f"Unkwown encoder {cfg.model.encoder.type}")
 
         self.init_mac()
 
         self.loss_fn = nn.CrossEntropyLoss(reduction="none")
+
+    @property
+    def dataset_name(self):
+        if (self.cfg.train.dataset == "orig") or (self.cfg.train.dataset == "uni"):
+            return "clevr"
+        elif self.cfg.train.dataset == "gqa":
+            return "gqa"
 
     def __add_param_group(self, group_name, params, module_name):
         default = self.cfg.train.optimizers.default
@@ -72,8 +83,13 @@ class PLModel(BasePLModel):
             {"params": params, "lr": getattr(options, "lr", default.lr),}
         )
 
-    def init_resnet_encoder(self):
-        encoder = resnet50(pretrained=True)
+    def init_resnet_encoder(self, v):
+        if v == "resnet50":
+            encoder = resnet50(pretrained=True)
+            self.cfg.model.mac.input_unit.in_channels = 1024
+        elif v == "resnet101":
+            encoder = resnet101(pretrained=True)
+            self.cfg.model.mac.input_unit.in_channels = 1024
         encoder = nn.Sequential(*list(encoder.children())[:-3])
         self.encoder = nn.Sequential(
             Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), encoder,
@@ -81,7 +97,6 @@ class PLModel(BasePLModel):
         for p in self.encoder.parameters():
             p.requires_grad = False
         self.encoder.eval()
-        self.cfg.model.mac.input_unit.in_channels = 1024
 
     def init_scratch_encoder(self):
         encoder = Encoder(out_nc=self.cfg.model.encoder.out_nc)
@@ -134,27 +149,51 @@ class PLModel(BasePLModel):
         return optimizers
 
     def prepare_data(self):
-        self.orig_train_dataset = ClevrDatasetImages(
-            base_dir=self.cfg.orig_dir, split="train", augment=self.cfg.train.augment,
-        )
+        if self.dataset_name == "clevr":
+            self.orig_train_dataset = ClevrDatasetImages(
+                base_dir=self.cfg.orig_dir,
+                split="train",
+                augment=self.cfg.train.augment,
+            )
 
-        self.orig_val_dataset = ClevrDatasetImages(
-            base_dir=self.cfg.orig_dir, split="val", augment=False,
-        )
+            self.orig_val_dataset = ClevrDatasetImages(
+                base_dir=self.cfg.orig_dir, split="val", augment=False,
+            )
 
-        # self.uni_train_dataset = ClevrDatasetImages(
-        #     base_dir=self.cfg.uni_dir, split="train", augment=self.cfg.train.augment,
-        # )
+            self.uni_train_dataset = ClevrDatasetImages(
+                base_dir=self.cfg.uni_dir,
+                split="train",
+                augment=self.cfg.train.augment,
+            )
 
-        self.uni_val_dataset = ClevrDatasetImages(
-            base_dir=self.cfg.uni_dir, split="val", augment=False,
-        )
+            self.uni_val_dataset = ClevrDatasetImages(
+                base_dir=self.cfg.uni_dir, split="val", augment=False,
+            )
+        else:
+            self.train_dataset = GQADataset(
+                base_dir=self.cfg.orig_dir,
+                split="train",
+                augment=self.cfg.train.augment,
+                features=self.cfg.model.mac.use_feats,
+            )
+
+            self.val_dataset = GQADataset(
+                base_dir=self.cfg.orig_dir,
+                split="val",
+                augment=False,
+                features=self.cfg.model.mac.use_feats,
+            )
 
     def train_dataloader(self):
         if self.cfg.train.dataset == "orig":
             dataset = self.orig_train_dataset
+            _collate_fn = collate_fn
         elif self.cfg.train.dataset == "uni":
-            datset = self.uni_train_dataset
+            dataset = self.uni_train_dataset
+            _collate_fn = collate_fn
+        elif self.cfg.train.dataset == "gqa":
+            dataset = self.train_dataset
+            _collate_fn = collate_fn_gqa
 
         return DataLoader(
             dataset,
@@ -163,39 +202,52 @@ class PLModel(BasePLModel):
             batch_size=self.cfg.train.bsz // self.cfg.train.accumulate_grad_batches,
             num_workers=self.cfg.num_workers,
             pin_memory=self.use_cuda,
-            collate_fn=collate_fn,
+            collate_fn=_collate_fn,
         )
 
     def val_dataloader(self):
-        orig_val_loader = DataLoader(
-            self.orig_val_dataset,
-            shuffle=False,
-            drop_last=False,
-            batch_size=self.cfg.train.val_bsz,
-            num_workers=self.cfg.num_workers,
-            pin_memory=self.use_cuda,
-            collate_fn=collate_fn,
-        )
+        if self.dataset_name == "clevr":
+            orig_val_loader = DataLoader(
+                self.orig_val_dataset,
+                shuffle=False,
+                drop_last=False,
+                batch_size=self.cfg.train.val_bsz,
+                num_workers=self.cfg.num_workers,
+                pin_memory=self.use_cuda,
+                collate_fn=collate_fn,
+            )
 
-        uni_val_loader = DataLoader(
-            self.uni_val_dataset,
-            shuffle=False,
-            drop_last=False,
-            batch_size=self.cfg.train.val_bsz,
-            num_workers=self.cfg.num_workers,
-            pin_memory=self.use_cuda,
-            collate_fn=collate_fn,
-        )
+            uni_val_loader = DataLoader(
+                self.uni_val_dataset,
+                shuffle=False,
+                drop_last=False,
+                batch_size=self.cfg.train.val_bsz,
+                num_workers=self.cfg.num_workers,
+                pin_memory=self.use_cuda,
+                collate_fn=collate_fn,
+            )
 
-        # return orig_val_loader
-        return [orig_val_loader, uni_val_loader]
+            return [orig_val_loader, uni_val_loader]
+        elif self.dataset_name == "gqa":
+            val_loader = DataLoader(
+                self.val_dataset,
+                shuffle=False,
+                drop_last=False,
+                batch_size=self.cfg.train.val_bsz,
+                num_workers=self.cfg.num_workers,
+                pin_memory=self.use_cuda,
+                collate_fn=collate_fn_gqa,
+            )
+            return val_loader
 
     def forward(self, img, question, question_len):
         return self.mac(self.encoder(img), question, question_len)
 
     def state_dict(self):
         state_dict = super(BasePLModel, self).state_dict()
-        if self.cfg.model.encoder.type == "resnet50":
+        if (self.cfg.model.encoder.type == "resnet50") or (
+            self.cfg.model.encoder.type == "resnet101"
+        ):
             # Dont save resnet weights
             for k in list(state_dict.keys()):
                 if k.startswith("encoder"):
@@ -203,6 +255,14 @@ class PLModel(BasePLModel):
         return state_dict
 
     def training_step(self, batch, batch_nb, optimizer_idx=None):
+        if batch_nb == 0:
+            if self.cfg.train.num_plot_samples > 0:
+                self.plot_vqa_attn(
+                    batch,
+                    "train_step_attn",
+                    num_samples=self.cfg.train.num_plot_samples,
+                )
+
         image, question, question_len, answer = (
             batch["image"],
             batch["question"],
@@ -220,10 +280,6 @@ class PLModel(BasePLModel):
         #         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.TRAIN.CLIP)
 
         tqdm_dict = {"acc": acc}
-        if batch_nb == 0:
-            self.plot_vqa_attn(
-                batch, "train_step_attn", num_samples=self.cfg.train.num_plot_samples,
-            )
 
         return {
             "loss": loss,
@@ -249,14 +305,15 @@ class PLModel(BasePLModel):
 
         if batch_nb == 0:
             if dataset_idx == 0:
-                fig_name = "orig_step_attn"
+                fig_name = "val_orig_step_attn"
             elif dataset_idx == 1:
-                fig_name = "uni_step_attn"
+                fig_name = "val_uni_step_attn"
             else:
-                fig_name = "step_attn"
-            self.plot_vqa_attn(
-                batch, fig_name, num_samples=self.cfg.train.num_plot_samples,
-            )
+                fig_name = "val_step_attn"
+            if self.cfg.train.num_plot_samples > 0:
+                self.plot_vqa_attn(
+                    batch, fig_name, num_samples=self.cfg.train.num_plot_samples,
+                )
 
         return {
             "loss": loss.cpu(),
@@ -269,18 +326,28 @@ class PLModel(BasePLModel):
         def mean_agg(olist):
             return torch.cat(olist).float().mean()
 
-        mean_orig_loss = mean_agg([o["loss"] for o in outputs[0]])
-        mean_orig_acc = mean_agg([o["acc"] for o in outputs[0]])
-        mean_uni_loss = mean_agg([o["loss"] for o in outputs[1]])
-        mean_uni_acc = mean_agg([o["acc"] for o in outputs[1]])
+        if self.dataset_name == "clevr":
+            mean_orig_loss = mean_agg([o["loss"] for o in outputs[0]])
+            mean_orig_acc = mean_agg([o["acc"] for o in outputs[0]])
+            mean_uni_loss = mean_agg([o["loss"] for o in outputs[1]])
+            mean_uni_acc = mean_agg([o["acc"] for o in outputs[1]])
 
-        log = {
-            "val_orig_loss": mean_orig_loss,
-            "val_orig_acc": mean_orig_acc,
-            "val_uni_loss": mean_uni_loss,
-            "val_uni_acc": mean_uni_acc,
-            "current_epoch": self.current_epoch,
-        }
+            log = {
+                "val_orig_loss": mean_orig_loss,
+                "val_orig_acc": mean_orig_acc,
+                "val_uni_loss": mean_uni_loss,
+                "val_uni_acc": mean_uni_acc,
+                "current_epoch": self.current_epoch,
+            }
+        elif self.dataset_name == "gqa":
+            mean_loss = mean_agg([o["loss"] for o in outputs])
+            mean_acc = mean_agg([o["acc"] for o in outputs])
+
+            log = {
+                "val_loss": mean_loss,
+                "val_acc": mean_acc,
+                "current_epoch": self.current_epoch,
+            }
 
         self.print()
         self.print(pp.pformat(log))
@@ -288,76 +355,84 @@ class PLModel(BasePLModel):
         return {"log": log}
 
     def plot_vqa_attn(self, batch, fig_name, num_samples=32, close=True):
-        with torch.no_grad():
-            return_layers = {
-                "mac.mac.control.cw_attn_idty": "cw_attn",
-                "mac.mac.read.kb_attn_idty": "kb_attn",
-            }
-            mid_getter = MidGetter(self, return_layers, keep_output=True)
+        if num_samples > 0:
+            with torch.no_grad():
+                return_layers = {
+                    "mac.mac.control.cw_attn_idty": "cw_attn",
+                    "mac.mac.read.kb_attn_idty": "kb_attn",
+                }
+                mid_getter = MidGetter(self, return_layers, keep_output=True)
 
-            image, question, question_len, answer = (
-                batch["image"],
-                batch["question"],
-                batch["question_length"],
-                batch["answer"],
-            )
-            answer = answer.long()
-            mid_outputs, output = mid_getter(
-                image[:num_samples], question[:num_samples], question_len[:num_samples]
-            )
-            output = output.detach().cpu()
+                image, question, question_len, answer = (
+                    batch["image"],
+                    batch["question"],
+                    batch["question_length"],
+                    batch["answer"],
+                )
+                answer = answer.long()
+                mid_outputs, output = mid_getter(
+                    image[:num_samples],
+                    question[:num_samples],
+                    question_len[:num_samples],
+                )
+                output = output.detach().cpu()
 
-            for k, v in mid_outputs.items():
-                if isinstance(v, torch.Tensor):
-                    mid_outputs[k] = v.detach().cpu()
-                elif isinstance(v, list):
-                    mid_outputs[k] = [_v.detach().cpu() for _v in v]
+                for k, v in mid_outputs.items():
+                    if isinstance(v, torch.Tensor):
+                        mid_outputs[k] = v.detach().cpu()
+                    elif isinstance(v, list):
+                        mid_outputs[k] = [_v.detach().cpu() for _v in v]
 
-            bsz = question.size(0)
-            num_samples = min(num_samples, bsz)
+                bsz = question.size(0)
+                num_samples = min(num_samples, bsz)
+
+                torch.cuda.empty_cache()
+
+                kb_attn = torch.stack(mid_outputs["kb_attn"], 1).detach().cpu().numpy()
+                words_attn = (
+                    torch.stack(mid_outputs["cw_attn"], 1)
+                    .squeeze(-1)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+                num_lobs = 0
+                num_steps = words_attn.shape[1]
+                # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
+                fig11 = plt.figure(
+                    figsize=(
+                        8,
+                        (num_samples * (2 * (num_steps + num_steps // 2) + 4)) // 2,
+                    )
+                )
+                outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
+
+                for i in range(num_samples):
+                    plot_vqa_attn(
+                        img=batch["raw_images"][i],
+                        num_steps=num_steps,
+                        words=batch["question_words"][i],
+                        words_attn=words_attn[i, :, : batch["question_length"][i]],
+                        img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_lobs],
+                        prediction=self.vocab["answer_idx_to_token"][
+                            output[i].argmax().item()
+                        ],
+                        real_answer=batch["answer_words"][i],
+                        fig=fig11,
+                        gridspec=outer_grid[i],
+                    )
+
+                    cw_ax = fig11.get_axes()[i * (3 + num_steps)]
+                    cw_ax.set_title(
+                        "Question %s" % str(batch["question_idxs"][i]), fontsize=10
+                    )
+                    img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
+                    # print(ds.questions[q_index])
+                    img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
+                # plt.tight_layout()
+                self.log_figure(fig11, fig_name, close=close)
 
             torch.cuda.empty_cache()
 
-            kb_attn = torch.stack(mid_outputs["kb_attn"], 1).detach().cpu().numpy()
-            words_attn = (
-                torch.stack(mid_outputs["cw_attn"], 1)
-                .squeeze(-1)
-                .detach()
-                .cpu()
-                .numpy()
-            )
-
-            num_lobs = 0
-            num_steps = words_attn.shape[1]
-            # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
-            fig11 = plt.figure(
-                figsize=(8, (num_samples * (2 * (num_steps + num_steps // 2) + 4)) // 2)
-            )
-            outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
-
-            for i in range(num_samples):
-                plot_vqa_attn(
-                    img=batch["raw_images"][i],
-                    num_steps=num_steps,
-                    words=batch["question_words"][i],
-                    words_attn=words_attn[i, :, : batch["question_length"][i]],
-                    img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_lobs],
-                    prediction=self.vocab["answer_idx_to_token"][
-                        output[i].argmax().item()
-                    ],
-                    real_answer=batch["answer_words"][i],
-                    fig=fig11,
-                    gridspec=outer_grid[i],
-                )
-
-                cw_ax = fig11.get_axes()[i * (3 + num_steps)]
-                cw_ax.set_title("Question %d" % batch["question_idxs"][i], fontsize=10)
-                img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
-                # print(ds.questions[q_index])
-                img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
-            # plt.tight_layout()
-            self.log_figure(fig11, fig_name, close=close)
-
-        torch.cuda.empty_cache()
-
-        return fig11
+            return fig11

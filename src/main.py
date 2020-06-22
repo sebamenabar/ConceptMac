@@ -40,6 +40,12 @@ if __name__ == "__main__":
             print(pp.pformat(cfg))
 
             loggers = model.make_lightning_loggers()
+
+            if model.dataset_name == "clevr":
+                monitor = "val_uni_acc"
+            else:
+                monitor = "val_acc"   
+
             default_ckpt_callback_kwargs = {
                 "filepath": osp.join(model.exp_dir, "checkpoints/"),
                 "monitor": "val_uni_acc",
