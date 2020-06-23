@@ -3,7 +3,7 @@ from pytorch_lightning.utilities import parsing
 from base_config import __C, parse_args_and_set_config, edict, _to_values_only
 
 
-parse_bool = lambda x: bool(parsing.str_to_bool(x))
+parse_bool = lambda x: bool(parsing.strtobool(x))
 
 if torch.cuda.is_available():
     __C.orig_dir = (
@@ -49,7 +49,7 @@ __C.model.mac = edict(
     max_step=(12, edict(type=int)),
     separate_syntax_semantics=False,
     use_feats=("spatial", edict(type=str, choices=["spatial", "objects", "pixels"])),
-    num_gt_lobs=0,
+    num_gt_lobs=(0, edict(type=int)),
     common=edict(
         module_dim=(512, edict(type=int)),
         # use_feats='spatial',

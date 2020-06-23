@@ -397,7 +397,7 @@ class PLModel(BasePLModel):
                     .numpy()
                 )
 
-                num_lobs = 0
+                num_gt_lobs = self.cfg.model.mac.num_gt_lobs
                 num_steps = words_attn.shape[1]
                 # fig11 = plt.figure(figsize=(16, (bsz * (2 * (num_steps + num_steps // 2) + 4)) // 1))
                 fig11 = plt.figure(
@@ -414,13 +414,15 @@ class PLModel(BasePLModel):
                         num_steps=num_steps,
                         words=batch["question_words"][i],
                         words_attn=words_attn[i, :, : batch["question_length"][i]],
-                        img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_lobs],
+                        img_attn=kb_attn[i, :, : kb_attn.shape[-1] - num_gt_lobs],
                         prediction=self.vocab["answer_idx_to_token"][
                             output[i].argmax().item()
                         ],
                         real_answer=batch["answer_words"][i],
                         fig=fig11,
                         gridspec=outer_grid[i],
+                        num_gt_lobs=num_gt_lobs,
+                        gt_lobs_attn=kb_attn[i, :, -num_gt_lobs:],
                     )
 
                     cw_ax = fig11.get_axes()[i * (3 + num_steps)]
