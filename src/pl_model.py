@@ -409,7 +409,7 @@ class PLModel(BasePLModel):
                 outer_grid = fig11.add_gridspec(num_samples, 1, wspace=0.0, hspace=0.1)
 
                 for i in range(num_samples):
-                    plot_vqa_attn(
+                    _, (img_ax, cw_ax) = plot_vqa_attn(
                         img=batch["raw_images"][i],
                         num_steps=num_steps,
                         words=batch["question_words"][i],
@@ -425,11 +425,11 @@ class PLModel(BasePLModel):
                         gt_lobs_attn=kb_attn[i, :, -num_gt_lobs:],
                     )
 
-                    cw_ax = fig11.get_axes()[i * (3 + num_steps)]
+                    # cw_ax = fig11.get_axes()[i * (3 + num_steps)]
                     cw_ax.set_title(
                         "Question %s" % str(batch["question_idxs"][i]), fontsize=10
                     )
-                    img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
+                    # img_ax = fig11.get_axes()[i * (3 + num_steps) + 2]
                     # print(ds.questions[q_index])
                     img_ax.set_title(batch["image_fnames"][i], fontsize=6, wrap=True)
                 # plt.tight_layout()

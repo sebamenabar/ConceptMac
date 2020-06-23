@@ -266,9 +266,10 @@ def plot_vqa_attn(
             index=index,
             vmax=objs_attn.max(),
         )
-
-    # ax_table_cw = fig.add_subplot(g0[:math.ceil(grid_h / 2), 0])
-    ax_table_cw = fig.add_subplot(g0[:, 0])
+        ax_table_cw = fig.add_subplot(g0[:math.ceil(grid_h / 2), 0])
+    else:
+        ax_table_cw = fig.add_subplot(g0[:, 0])
+        
     plot_table_attn(
         ax=ax_table_cw,
         data=words_attn.T,
@@ -306,7 +307,7 @@ def plot_vqa_attn(
         ax_i.set_axis_off()
         ax_i.set_aspect("auto")
 
-    return fig
+    return fig, (ax_raw_image, ax_table_cw)
 
 
 def interpolate(val, x_low, x_high):
