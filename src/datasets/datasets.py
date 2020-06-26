@@ -205,7 +205,7 @@ def collate_fn(batch):
 
         question_words.append(b["question_words"])
         answer_words.append(b["answer_word"])
-        raw_images.append(b["raw_image"])
+        raw_images.append(b.get("raw_image", None))
         question_idxs.append(b["question_idx"])
         image_fnames.append(b["image_fname"])
 
